@@ -10,7 +10,7 @@ local EDGE = 6
 local TAB_W, TAB_H = 24, 52
 local GAP = 8
 
-local container, handle, pager
+local container, handle, pager, grip
 local holders, slots = {}, {}
 
 local DEFAULTS = { enabled = true, count = 5, size = 46, open = true, seeded = false, page = 1 }
@@ -33,6 +33,11 @@ local function Settings()
     quick.count = ns.Clamp(math.floor(tonumber(quick.count) or 4), 3, MAX_SLOTS)
     quick.size = ns.Clamp(tonumber(quick.size) or 46, 36, 64)
     quick.page = ns.Clamp(math.floor(tonumber(quick.page) or 1), 1, PAGES)
+    -- Where the whole bar has been dragged to in Customize mode, in points from its default
+    -- place at the left edge. Kept on screen by the layout.
+    if type(quick.offset) ~= "table" then quick.offset = { x = 0, y = 0 } end
+    quick.offset.x = tonumber(quick.offset.x) or 0
+    quick.offset.y = tonumber(quick.offset.y) or 0
     if not quick.fiveSlots then
         quick.fiveSlots = true
         if quick.count == 4 then quick.count = 5 end
@@ -135,6 +140,44 @@ function Quick:Init()
         if ns.db and type(ns.db.quick) == "table" then ns.db.quick.open = open end
     end)
     handle:Hide()
+
+    -- Customize mode: a grip above the bar moves the whole block (tab, pager and slots) as one,
+    -- so it can be pulled out from under a camera cut-out such as the Dynamic Island. Not a
+    -- secure frame: it only changes the saved offset and lays the bar out again, out of combat.
+    grip = CreateFrame("Button", "WolkaraMobileQuickGrip", UIParent)
+    grip:SetFrameStrata("DIALOG")
+    ns.Box(grip, "BACKGROUND", 1, 0.82, 0.2, 0.35)
+    grip.label = ns.Label(grip, "GameFontNormalSmall", ns.T("Move"))
+    grip.label:SetPoint("CENTER")
+    grip:Hide()
+    local function CursorPoints()
+        local x, y = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        if not x or not scale or scale == 0 then return nil end
+        return x / scale, y / scale
+    end
+    grip:SetScript("OnMouseDown", function(self)
+        if InCombatLockdown() or not (ns.editing or ns.editMode) then return end
+        local x, y = CursorPoints()
+        if not x then return end
+        local offset = Settings().offset
+        self.from = { x = x, y = y, ox = offset.x, oy = offset.y }
+    end)
+    grip:SetScript("OnMouseUp", function(self)
+        if not self.from then return end
+        self.from = nil
+        if ns.MarkChanged then ns.MarkChanged() end
+    end)
+    grip:SetScript("OnUpdate", function(self)
+        local from = self.from
+        if not from or InCombatLockdown() then self.from = nil; return end
+        local x, y = CursorPoints()
+        if not x then return end
+        local offset = Settings().offset
+        offset.x = from.ox + (x - from.x)
+        offset.y = from.oy - (y - from.y)
+        Quick:Layout()
+    end)
 end
 
 local function HideLeft()
@@ -147,14 +190,22 @@ end
 function Quick:Layout()
     if not container or InCombatLockdown() then return end
     local quick = Settings()
-    if not quick.enabled or not ns.DuoLayout() then container:Hide(); handle:Hide(); return end
+    if not quick.enabled or not ns.DuoLayout() then container:Hide(); handle:Hide(); grip:Hide(); return end
 
-    local top = UIParent:GetHeight() * TOP
     local size = quick.size
     local pagerHeight = math.floor(size * 0.55)
-    local x = EDGE + TAB_W + 6
-    local first = top + pagerHeight + GAP
     local height = pagerHeight + GAP + quick.count * size + (quick.count - 1) * GAP
+    local screenW, screenH = UIParent:GetWidth(), UIParent:GetHeight()
+    local blockW = TAB_W + 6 + size
+    -- The saved offset, kept so the whole block (and the grip above it) stays on screen.
+    local offset = quick.offset
+    offset.x = ns.Clamp(offset.x, -EDGE, math.max(-EDGE, screenW - blockW - EDGE * 2))
+    local baseTop = screenH * TOP
+    offset.y = ns.Clamp(offset.y, 28 - baseTop, math.max(28 - baseTop, screenH - height - baseTop - 4))
+    local top = baseTop + offset.y
+    local left = EDGE + offset.x
+    local x = left + TAB_W + 6
+    local first = top + pagerHeight + GAP
 
     pager:ClearAllPoints()
     pager:SetSize(size, pagerHeight)
@@ -166,7 +217,12 @@ function Quick:Layout()
     handle:ClearAllPoints()
     handle:SetSize(TAB_W, TAB_H)
     handle:SetHitRectInsets(-6, -8, -10, -10)
-    handle:SetPoint("TOPLEFT", UIParent, "TOPLEFT", EDGE, -(top + (height - TAB_H) / 2))
+    handle:SetPoint("TOPLEFT", UIParent, "TOPLEFT", left, -(top + (height - TAB_H) / 2))
+
+    grip:ClearAllPoints()
+    grip:SetSize(blockW, 22)
+    grip:SetPoint("BOTTOMLEFT", UIParent, "TOPLEFT", left, -(top - 4))
+    grip:SetShown((ns.editing or ns.editMode) and true or false)
 
     for page = 1, PAGES do
         for index, button in ipairs(slots[page]) do
@@ -205,7 +261,13 @@ function Quick:Refresh()
     end
 end
 
-function Quick:SetEditing() self:Refresh() end
+function Quick:SetEditing(on)
+    if grip then
+        grip.from = nil
+        grip:SetShown((on or ns.editMode) and container ~= nil and Settings().enabled and ns.DuoLayout() and true or false)
+    end
+    self:Refresh()
+end
 
 function Quick:CombatStarts()
     for page = 1, PAGES do
@@ -254,8 +316,9 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     elseif command == "off" then quick.enabled = false
     elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 3, MAX_SLOTS)
     elseif command == "size" and number then quick.size = ns.Clamp(number, 36, 64)
+    elseif command == "reset" then quick.offset = { x = 0, y = 0 }
     else
-        ns.Print("/mobile quick on, off, count 3-5, size 36-64. Now: " .. (quick.enabled and "on" or "off")
+        ns.Print("/mobile quick on, off, count 3-5, size 36-64, reset (position). Now: " .. (quick.enabled and "on" or "off")
             .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
         return
     end

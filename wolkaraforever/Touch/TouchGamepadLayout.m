@@ -80,6 +80,8 @@ NSString *AKGamepadStickButtonElement(NSString *element) {
         self.opacity = Number(values[@"opacity"],0.8);
         self.rearScale = Number(values[@"rearScale"],1);
         self.frontScale = Number(values[@"frontScale"],1);
+        self.moveSensitivity = Number(values[@"moveSensitivity"],1);
+        self.cameraSensitivity = Number(values[@"cameraSensitivity"],1);
         self.hapticsEnabled = Number(values[@"hapticsEnabled"],1) != 0;
         // Keep existing layouts in their original order. New/reset layouts put
         // triggers inside; an explicit stored choice always takes precedence.
@@ -160,6 +162,8 @@ NSString *AKGamepadStickButtonElement(NSString *element) {
 - (void)setOpacity:(CGFloat)value { _opacity = Clamp(value,0.05,1,0.8); }
 - (void)setRearScale:(CGFloat)value { _rearScale = Clamp(value,0.8,1.5,1); }
 - (void)setFrontScale:(CGFloat)value { _frontScale = Clamp(value,0.65,1.4,1); }
+- (void)setMoveSensitivity:(CGFloat)value { _moveSensitivity = Clamp(value,0.3,1,1); }
+- (void)setCameraSensitivity:(CGFloat)value { _cameraSensitivity = Clamp(value,0.3,1,1); }
 - (CGRect)frameForItem:(NSString *)item defaultFrame:(CGRect)frame inBounds:(CGRect)bounds {
     CGFloat width = MAX(0,MIN(frame.size.width,bounds.size.width));
     CGFloat height = MAX(0,MIN(frame.size.height,bounds.size.height));
@@ -187,6 +191,7 @@ NSString *AKGamepadStickButtonElement(NSString *element) {
         @"stickButtons":@(_stickButtonsEnabled), @"abilityZones":_abilityZones,
         @"opacity":@(_opacity),@"rearScale":@(_rearScale),
         @"frontScale":@(_frontScale),@"hapticsEnabled":@(_hapticsEnabled),@"swapShoulders":@(_swapShoulders),
+        @"moveSensitivity":@(_moveSensitivity),@"cameraSensitivity":@(_cameraSensitivity),
         @"performanceOverlayEnabled":@(_performanceOverlayEnabled),@"sticksOnly":@(_sticksOnly),
         @"floatingSticks":@(_floatingSticks),@"keepFree":_keepFree,@"elements":_elements,
         @"positions":[_positionsFull copy], SimplePositionsKey:[_positionsSimple copy]} forKey:LayoutKey];
@@ -194,6 +199,7 @@ NSString *AKGamepadStickButtonElement(NSString *element) {
 }
 - (void)reset {
     self.opacity = 0.8; self.rearScale = 1; self.frontScale = 1;
+    self.moveSensitivity = 1; self.cameraSensitivity = 1;
     self.hapticsEnabled = YES; self.swapShoulders = YES;
     self.performanceOverlayEnabled = NO;
     self.sticksOnly = AKInterfaceModeIsMobile();
@@ -379,6 +385,7 @@ static const NSUInteger AKGamepadMaximumZones = 6;
     return @{@"mode":[self modeName], @"stickButtons":@(_stickButtonsEnabled),
              @"abilityZones":[self abilityZones],
              @"opacity":@(_opacity), @"rearScale":@(_rearScale), @"frontScale":@(_frontScale),
+             @"moveSensitivity":@(_moveSensitivity), @"cameraSensitivity":@(_cameraSensitivity),
              @"hapticsEnabled":@(_hapticsEnabled), @"swapShoulders":@(_swapShoulders),
              @"performanceOverlayEnabled":@(_performanceOverlayEnabled),
              @"sticksOnly":@(_sticksOnly), @"floatingSticks":@(_floatingSticks),
@@ -397,6 +404,8 @@ static const NSUInteger AKGamepadMaximumZones = 6;
     self.opacity = Number(values[@"opacity"],_opacity);
     self.rearScale = Number(values[@"rearScale"],_rearScale);
     self.frontScale = Number(values[@"frontScale"],_frontScale);
+    self.moveSensitivity = Number(values[@"moveSensitivity"],_moveSensitivity);
+    self.cameraSensitivity = Number(values[@"cameraSensitivity"],_cameraSensitivity);
     if ([values[@"hapticsEnabled"] isKindOfClass:NSNumber.class]) _hapticsEnabled = [values[@"hapticsEnabled"] boolValue];
     if ([values[@"swapShoulders"] isKindOfClass:NSNumber.class]) _swapShoulders = [values[@"swapShoulders"] boolValue];
     if ([values[@"performanceOverlayEnabled"] isKindOfClass:NSNumber.class]) _performanceOverlayEnabled = [values[@"performanceOverlayEnabled"] boolValue];
