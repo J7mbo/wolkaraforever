@@ -27,6 +27,19 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return CGPointMake(x * scale,y * scale);
 }
 
+CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity) {
+    if (!isfinite(position.x) || !isfinite(position.y) || !isfinite(sensitivity)) return CGPointZero;
+    CGFloat s = MAX(0.3, MIN(1, sensitivity));
+    CGFloat length = hypot(position.x, position.y);
+    if (s >= 0.999 || length <= 0) return position;
+    CGFloat magnitude = MIN(1, length);
+    CGFloat deadZone = (1 - s) * 0.15;
+    if (magnitude <= deadZone) return CGPointZero;
+    CGFloat t = (magnitude - deadZone) / (1 - deadZone);
+    CGFloat shaped = pow(t, 1 + (1 - s) * 2);
+    return CGPointMake(position.x / length * shaped, position.y / length * shaped);
+}
+
 @interface AKGamepadButton : UIButton
 @property(nonatomic, copy) NSString *element;
 @property(nonatomic, copy) NSString *slot;
@@ -1005,13 +1018,15 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     [stack addArrangedSubview:_settingsColumns];
     NSMutableArray *sliders = [NSMutableArray new], *values = [NSMutableArray new];
     NSArray *names = @[AKHostLocalized(@"touch.settings.transparency"), AKHostLocalized(@"touch.settings.shoulderSize"),
-                       AKHostLocalized(@"touch.settings.stickSize")];
-    CGFloat initial[] = {1-_preferences.opacity,_preferences.rearScale,_preferences.frontScale};
-    CGFloat min[] = {0,0.8,0.65}, max[] = {0.95,1.5,1.4};
-    for (NSUInteger i=0; i<3; i++) {
+                       AKHostLocalized(@"touch.settings.stickSize"), AKHostLocalized(@"touch.settings.moveSensitivity"),
+                       AKHostLocalized(@"touch.settings.cameraSensitivity")];
+    CGFloat initial[] = {1-_preferences.opacity,_preferences.rearScale,_preferences.frontScale,
+                         _preferences.moveSensitivity,_preferences.cameraSensitivity};
+    CGFloat min[] = {0,0.8,0.65,0.3,0.3}, max[] = {0.95,1.5,1.4,1,1};
+    for (NSUInteger i=0; i<5; i++) {
         UILabel *value = [self label:@""]; [values addObject:value]; [sizes addArrangedSubview:value];
         UISlider *slider = [UISlider new]; slider.tag = i; slider.minimumValue = min[i]; slider.maximumValue = max[i]; slider.value = initial[i];
-        slider.accessibilityLabel = names[i]; slider.accessibilityIdentifier = [@"wolkaraforever.controls." stringByAppendingString:@[@"transparency",@"rearScale",@"frontScale"][i]];
+        slider.accessibilityLabel = names[i]; slider.accessibilityIdentifier = [@"wolkaraforever.controls." stringByAppendingString:@[@"transparency",@"rearScale",@"frontScale",@"moveSensitivity",@"cameraSensitivity"][i]];
         [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
         [sliders addObject:slider]; [sizes addArrangedSubview:slider];
     }
@@ -1129,12 +1144,18 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     _values[0].text = AKHostLocalizedFormat(@"touch.settings.transparency.value", (1-_preferences.opacity)*100);
     _values[1].text = AKHostLocalizedFormat(@"touch.settings.shoulderSize.value", _preferences.rearScale*100);
     _values[2].text = AKHostLocalizedFormat(@"touch.settings.stickSize.value", _preferences.frontScale*100);
+    if (_values.count > 4) {
+        _values[3].text = AKHostLocalizedFormat(@"touch.settings.moveSensitivity.value", _preferences.moveSensitivity*100);
+        _values[4].text = AKHostLocalizedFormat(@"touch.settings.cameraSensitivity.value", _preferences.cameraSensitivity*100);
+    }
     for (NSUInteger i=0; i<_sliders.count; i++) _sliders[i].accessibilityValue = _values[i].text;
 }
 - (void)sliderChanged:(UISlider *)slider {
     if (slider.tag == 0) _preferences.opacity = 1-slider.value;
     else if (slider.tag == 1) _preferences.rearScale = slider.value;
     else if (slider.tag == 2) _preferences.frontScale = slider.value;
+    else if (slider.tag == 3) _preferences.moveSensitivity = slider.value;
+    else if (slider.tag == 4) _preferences.cameraSensitivity = slider.value;
     [_preferences save]; [self updateValues]; [self updateAppearance];
 }
 - (void)swapShouldersChanged:(UISwitch *)sender {
@@ -1169,6 +1190,7 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
 - (void)resetLayout {
     [self reset]; [_preferences reset];
     _sliders[0].value = 1-_preferences.opacity; _sliders[1].value = _preferences.rearScale; _sliders[2].value = _preferences.frontScale;
+    if (_sliders.count > 4) { _sliders[3].value = _preferences.moveSensitivity; _sliders[4].value = _preferences.cameraSensitivity; }
     _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _overlaySwitch.on = _preferences.performanceOverlayEnabled;
     _sticksOnlySwitch.on = _preferences.sticksOnly; _floatingSwitch.on = _preferences.floatingSticks;
@@ -1441,7 +1463,9 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
 - (void)stickChanged:(AKGamepadStick *)stick {
     if (_visible && !_overlay.configuring) {
         [_haptics stickMoved:stick.position left:stick == _overlay.leftStick];
-        [_virtualController setPosition:stick.position forDirectionPadElement:stick.element];
+        BOOL left = stick == _overlay.leftStick;
+        CGFloat sensitivity = left ? _overlay.preferences.moveSensitivity : _overlay.preferences.cameraSensitivity;
+        [_virtualController setPosition:AKTouchGamepadShapeStick(stick.position, sensitivity) forDirectionPadElement:stick.element];
     }
 }
 - (void)disconnectController {

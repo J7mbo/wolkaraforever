@@ -437,6 +437,10 @@
 "touch.settings.shoulderSize.value" = "Shoulder button size · %.0f%%";
 "touch.settings.stickSize" = "Sticks and face button size";
 "touch.settings.stickSize.value" = "Sticks and face button size · %.0f%%";
+"touch.settings.moveSensitivity" = "Movement stick sensitivity";
+"touch.settings.moveSensitivity.value" = "Movement stick sensitivity · %.0f%%";
+"touch.settings.cameraSensitivity" = "Camera stick sensitivity";
+"touch.settings.cameraSensitivity.value" = "Camera stick sensitivity · %.0f%%";
 "touch.settings.outerTriggers" = "Triggers on the outside";
 "touch.settings.outerTriggers.simple" = "The simple layout has no triggers to move.";
 "touch.settings.sticksOnly" = "Sticks and jump only (hide the other buttons)";
