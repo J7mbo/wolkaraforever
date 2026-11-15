@@ -287,11 +287,12 @@ static const CGFloat AKAutoRunArm = 60;
         return;
     }
     _tapWindowPoint = touch ? [touch locationInView:nil] : CGPointZero;
+    // The touch that stopped an auto-run did its job by stopping it: it is not also a tap.
+    BOOL stoppedRun = _stoppedRun;
     [self reset]; [self fadeOut];
     // Reported after the reset, so the tap is judged against a stick that is already let go of:
     // a gesture never depends on the position the tap left behind.
-    if (tap && self.tapRecognized) self.tapRecognized(touch.timestamp);
-    if (_stoppedRun) { _stoppedRun = NO; return; }
+    if (tap && !stoppedRun && self.tapRecognized) self.tapRecognized(touch.timestamp);
 }
 - (void)cancelTrackingWithEvent:(UIEvent *)event {
     (void)event;
