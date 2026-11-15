@@ -8,6 +8,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 // 1 returns the position unchanged; lower values add a little dead zone and bend the
 // magnitude so small movements are gentler. Direction is kept, and a full throw stays full.
 CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity);
+// A tap on a floating stick that the game should have: userInfo x/y, window coordinates.
+// The view the game draws in clicks there.
+FOUNDATION_EXPORT NSNotificationName const AKGamepadTapThroughNotification;
 // Owns only our virtual device. Physical controllers and their handlers stay
 // with GameController/the guest. No game events or memory are inspected.
 @interface AKTouchGamepad : NSObject
