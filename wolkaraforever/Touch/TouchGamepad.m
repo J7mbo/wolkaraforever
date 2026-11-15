@@ -770,6 +770,11 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
 // everywhere else - including any area the player reserved - is not ours, so the touch goes on
 // to whatever is underneath. Nothing here forwards a touch by hand: returning nil is the app's
 // own hit-testing doing it.
+static const CGFloat AKFloatWheelInner = 0.17, AKFloatWheelOuter = 0.52;
+static BOOL AKFloatWheelReserved(void) {
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraForeverWheelDragV1"];
+    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
+}
 - (UIView *)floatingHit:(CGPoint)point event:(UIEvent *)event {
     CGSize size = self.bounds.size;
     if (size.width <= 0 || size.height <= 0) return nil;
@@ -793,6 +798,10 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
         AKGamepadButton *jump = _jumpButton;
         return jump.enabled ? jump : nil;
     }
+    // The spell wheel's ring around the corner (WolkaraRoue) belongs to the game, so a tap
+    // there casts and a drag turns the wheel instead of growing the camera stick. The same
+    // band and the same switch as the wheel drag in the touch layer (WolkaraForeverWheelDragV1).
+    if (corner >= AKFloatWheelInner * h && corner <= AKFloatWheelOuter * h && AKFloatWheelReserved()) return nil;
     if (fx <= AKFloatLeftMaxX && (fy >= AKFloatLeftLowY || (fx >= AKFloatLeftMinX && fy >= AKFloatLeftMinY)))
         return [self stickHeld:_leftStick event:event] ? _sink : _leftStick;
     if (fx >= AKFloatRightMinX && fy >= AKFloatRightMinY && fy <= AKFloatRightMaxY)
