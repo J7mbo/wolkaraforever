@@ -105,6 +105,8 @@ local function General(page)
     y = Row(page, y, ns.T("Windows"))
     Switch(page, X2, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().size == "large" end,
         function(v) if ns.Placement then ns.Placement.Settings().size = v and "large" or "fit" end end, ns.T("Large"), ns.T("Fit"), 150)
+    Stepper(page, X2 + 160, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().zoom or 100 end,
+        function(v) if ns.Placement then ns.Placement.Settings().zoom = v end end, 10, 100, 200, ns.T("%"))
     y = Row(page, y, ns.T("Positions"))
     Button(page, X2, y + ROW_H, ns.T("Customize"), 150, function() panel:Hide(); ns.SetEditing(true) end)
     Button(page, X3, y + ROW_H, ns.T("Reset positions"), 180, function()
