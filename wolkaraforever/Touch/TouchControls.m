@@ -9,6 +9,7 @@
 #import "TouchGamepadLayout.h"
 #import "TouchGamepad.h"
 #import "TouchHaptics.h"
+#import <Security/Security.h>
 #import <objc/message.h>
 
 // Null until the app's shell says which keys are the user's; null means "nothing is owned",
@@ -584,6 +585,51 @@ static NSString *AKKeyAccessibilityNameKey(NSString *title) {
 }
 @end
 
+#pragma mark - The saved game password
+
+// Optional, and only when the player asks: one password, kept in this device's Keychain behind
+// Face ID or the passcode (user presence), never synchronised to iCloud and never written to a
+// log or to the game's files. It is read only when the player taps the key while the game's
+// own password field has the keyboard, and then typed exactly like a typed password.
+static NSString *const AKSavedPasswordService = @"local.wolkaraforever.game-password";
+static NSDictionary *AKSavedPasswordQuery(void) {
+    return @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+             (__bridge id)kSecAttrService: AKSavedPasswordService,
+             (__bridge id)kSecAttrAccount: @"battle.net"};
+}
+static OSStatus AKSavedPasswordStore(NSString *password) {
+    SecItemDelete((__bridge CFDictionaryRef)AKSavedPasswordQuery());
+    CFErrorRef error = NULL;
+    SecAccessControlRef access = SecAccessControlCreateWithFlags(NULL, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+                                                                 kSecAccessControlUserPresence, &error);
+    if (!access) { if (error) CFRelease(error); return errSecParam; }
+    NSMutableDictionary *item = [AKSavedPasswordQuery() mutableCopy];
+    item[(__bridge id)kSecValueData] = [password dataUsingEncoding:NSUTF8StringEncoding];
+    item[(__bridge id)kSecAttrAccessControl] = (__bridge_transfer id)access;
+    return SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+}
+static void AKSavedPasswordForget(void) {
+    SecItemDelete((__bridge CFDictionaryRef)AKSavedPasswordQuery());
+}
+// Off the main thread: the read is what shows Face ID, and it waits for the answer.
+static void AKSavedPasswordRead(void (^done)(NSString *password, OSStatus status)) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSMutableDictionary *query = [AKSavedPasswordQuery() mutableCopy];
+        query[(__bridge id)kSecReturnData] = @YES;
+        query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+        CFTypeRef result = NULL;
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+        NSString *password = nil;
+        if (status == errSecSuccess && result) {
+            NSData *data = (__bridge_transfer NSData *)result;
+            password = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        } else if (result) {
+            CFRelease(result);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ done(password, status); });
+    });
+}
+
 @implementation AKTouchControls {
     UIButton *_keyboardButton, *_trackpadButton, *_gamepadButton, *_settingsButton, *_leaveButton;
     UIButton *_toolbarHandle;
@@ -626,6 +672,7 @@ static NSString *AKKeyAccessibilityNameKey(NSString *title) {
     // Whether one of the game's password fields has the keyboard: the game asked for secure
     // event input (Carbon adapter, patch 0058).
     BOOL _protectedField;
+    UIButton *_passwordKey;
 }
 
 // The launcher's switch, and the platform's install path, ask this before the
@@ -1180,12 +1227,72 @@ static const unsigned short AKKeyF12 = 111;
     BOOL protectedField = [note.userInfo[@"enabled"] boolValue];
     BOOL changed = protectedField != _protectedField;
     _protectedField = protectedField;
-    // The keyboard reads the content type when it attaches, so an open keyboard is asked again.
-    if (changed) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.isFirstResponder) [self reloadInputViews];
-        });
-    }
+    if (!changed) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // The text view the keyboard is attached to is the one iOS asks about AutoFill, and it
+        // reads the content type when it attaches - so an open keyboard is asked again.
+        self->_keyboardInput.textContentType = self->_protectedField ? UITextContentTypePassword : nil;
+        if (self->_keyboardInput.isFirstResponder) [self->_keyboardInput reloadInputViews];
+        if (self.isFirstResponder) [self reloadInputViews];
+        self->_passwordKey.hidden = !self->_protectedField;
+    });
+}
+
+// The key on the keyboard's row while the game's password field has the keyboard: type the
+// saved password and Return, after Face ID. With nothing saved yet it offers to save one.
+- (void)typeSavedPassword:(NSString *)password {
+    if (!password.length || !_protectedField) return;
+    [self.delegate touchInsertText:password];
+    [self.delegate touchSpecialKey:36 characters:@"\r"];
+    AKLog(@"keyboard: the saved password was typed into a protected field");
+}
+- (UIViewController *)frontViewController {
+    UIViewController *root = self.window.rootViewController;
+    while (root.presentedViewController) root = root.presentedViewController;
+    return root;
+}
+- (void)savedPasswordKey {
+    if (!_protectedField) return;
+    AKSavedPasswordRead(^(NSString *password, OSStatus status) {
+        if (password.length) { [self typeSavedPassword:password]; return; }
+        if (status == errSecItemNotFound) [self offerToSavePassword];
+    });
+}
+- (void)offerToSavePassword {
+    UIViewController *front = [self frontViewController];
+    if (!front) return;
+    UIAlertController *ask = [UIAlertController alertControllerWithTitle:AKHostLocalized(@"touch.password.save.title")
+        message:AKHostLocalized(@"touch.password.save.message") preferredStyle:UIAlertControllerStyleAlert];
+    [ask addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.secureTextEntry = YES;
+        field.textContentType = UITextContentTypePassword;
+        field.placeholder = AKHostLocalized(@"touch.password.save.placeholder");
+    }];
+    [ask addAction:[UIAlertAction actionWithTitle:AKHostLocalized(@"touch.password.cancel")
+                                            style:UIAlertActionStyleCancel handler:nil]];
+    __weak UIAlertController *weakAsk = ask;
+    [ask addAction:[UIAlertAction actionWithTitle:AKHostLocalized(@"touch.password.save.confirm")
+                                            style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        (void)action;
+        NSString *password = weakAsk.textFields.firstObject.text;
+        if (!password.length || AKSavedPasswordStore(password) != errSecSuccess) return;
+        [self typeSavedPassword:password];
+    }]];
+    [front presentViewController:ask animated:YES completion:nil];
+}
+- (void)savedPasswordKeyHeld:(UILongPressGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateBegan) return;
+    UIViewController *front = [self frontViewController];
+    if (!front) return;
+    UIAlertController *ask = [UIAlertController alertControllerWithTitle:AKHostLocalized(@"touch.password.forget")
+        message:nil preferredStyle:UIAlertControllerStyleAlert];
+    [ask addAction:[UIAlertAction actionWithTitle:AKHostLocalized(@"touch.password.cancel")
+                                            style:UIAlertActionStyleCancel handler:nil]];
+    [ask addAction:[UIAlertAction actionWithTitle:AKHostLocalized(@"touch.password.forget")
+                                            style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        (void)action; AKSavedPasswordForget();
+    }]];
+    [front presentViewController:ask animated:YES completion:nil];
 }
 - (void)sendChatText:(NSString *)text {
     if (!text.length) {
@@ -1230,6 +1337,18 @@ static const unsigned short AKKeyF12 = 111;
             [button addTarget:self action:@selector(accessoryKey:) forControlEvents:UIControlEventTouchUpInside];
             [row addArrangedSubview:button];
         }
+        // The saved-password key: only while the game's password field has the keyboard.
+        _passwordKey = [UIButton buttonWithType:UIButtonTypeSystem];
+        _passwordKey.tag = 7;
+        _passwordKey.tintColor = UIColor.systemYellowColor;
+        [_passwordKey setImage:[UIImage systemImageNamed:@"key.fill"] forState:UIControlStateNormal];
+        _passwordKey.accessibilityIdentifier = @"wolkaraforever.keyboard.key.savedPassword";
+        _passwordKey.accessibilityLabel = AKHostLocalized(@"touch.key.savedPassword");
+        [_passwordKey addTarget:self action:@selector(savedPasswordKey) forControlEvents:UIControlEventTouchUpInside];
+        [_passwordKey addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                                                          action:@selector(savedPasswordKeyHeld:)]];
+        _passwordKey.hidden = !_protectedField;
+        [row insertArrangedSubview:_passwordKey atIndex:0];
         _accessory = row;
         [self updateDraftButtons];
     }
@@ -1290,7 +1409,7 @@ static const unsigned short AKKeyF12 = 111;
     _insertDraftButton.enabled = !active && [_keyboardInput canReplaceField];
     _clearDraftButton.enabled = !active && ready && _keyboardInput.hasText;
     for (UIButton *button in ((UIStackView *)_accessory).arrangedSubviews) {
-        button.enabled = button.tag == 6 || (ready && !_keyboardInput.hasText);
+        button.enabled = button.tag == 6 || button.tag == 7 || (ready && !_keyboardInput.hasText);
     }
 }
 
