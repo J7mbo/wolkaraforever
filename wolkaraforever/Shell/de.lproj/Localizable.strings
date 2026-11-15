@@ -447,9 +447,8 @@
 "touch.settings.moveSensitivity.value" = "Empfindlichkeit Bewegungsstick · %.0f %%";
 "touch.settings.cameraSensitivity" = "Empfindlichkeit Kamerastick";
 "touch.settings.cameraSensitivity.value" = "Empfindlichkeit Kamerastick · %.0f %%";
-"touch.settings.wheelArea" = "Bereich fürs Zauberrad";
-"touch.settings.wheelAreaSize" = "Größe des Zauberrad-Bereichs";
-"touch.settings.wheelAreaSize.value" = "Größe des Zauberrad-Bereichs · %.0f %%";
+"touch.settings.wheelArea" = "Zauberrad";
+"touch.settings.wheelArea.hint" = "Ziehen auf dem Rad in der Ecke unten rechts dreht es.";
 "touch.settings.outerTriggers" = "Trigger außen";
 "touch.settings.outerTriggers.simple" = "Das einfache Layout hat keine Trigger zum Verschieben.";
 "touch.settings.sticksOnly" = "Nur Sticks und Springen (andere Tasten ausblenden)";
