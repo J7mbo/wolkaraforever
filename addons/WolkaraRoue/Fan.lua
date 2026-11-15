@@ -215,8 +215,24 @@ local PLACE = [=[
 -- On release: how many slots the finger travelled, rounded to the nearest spell and kept inside
 -- the ring. Rounding by comparison, because there is no math.floor here.
 local UP = [=[
+    -- The ring's own tracking, kept up to date every frame of the drag on a plain frame the
+    -- secure code can read: where the finger has turned the ring to, and whether it moved at
+    -- all. It is only data - the secure code still does the placing.
+    local motion = owner:GetFrameRef("motion")
+    local tracked = motion and motion:GetAttribute("target")
+    owner:SetAttribute("lastpath", tracked and "tracked" or "angle")
+    if tracked then
+        if not motion:GetAttribute("moved") then return end
+        owner:SetAttribute("swiped", true)
+        local most = owner:GetAttribute("most")
+        if tracked < 0 then tracked = 0 elseif tracked > most then tracked = most end
+        owner:SetAttribute("offset", tracked)
+]=] .. PLACE .. [=[
+        return
+    end
 ]=] .. ANGLE .. [=[
     local from = owner:GetAttribute("downangle")
+    owner:SetAttribute("upangle", angle)
     if not angle or not from then return end
     local turns = (from - angle) / owner:GetAttribute("step")
     if turns < ]=] .. SWIPE .. [=[ and turns > -]=] .. SWIPE .. [=[ then return end
@@ -237,6 +253,8 @@ local UP = [=[
 -- left by the release cannot be trusted here: when the click came first, every spin cast the
 -- spell it ended on (and the flag then swallowed the next real tap).
 local CLICK = [=[
+    local motion = owner:GetFrameRef("motion")
+    if motion and motion:GetAttribute("moved") then return false end
     local from = owner:GetAttribute("downangle")
     owner:SetAttribute("swiped", nil)
     if not from then return end
@@ -252,6 +270,12 @@ local CLICK = [=[
 -- fraction is between two spells. Everything below is insecure and only draws.
 
 local geometry = { outer = 100, size = 56 }
+-- Not secure, so it can be written in combat; the secure release reads it (see UP).
+local tracker = CreateFrame("Frame", "WolkaraMobileFanTracker", UIParent)
+local function Track(target, moved)
+    tracker:SetAttribute("target", target)
+    tracker:SetAttribute("moved", moved and true or nil)
+end
 local motion = { pos = 0, vel = 0, target = 0, mode = nil, ghosts = false, samples = {} }
 
 local function Nearest(value)
@@ -410,6 +434,11 @@ driver:SetScript("OnUpdate", function(_, elapsed)
             motion.raw = raw
             Sample(raw)
             motion.pos = Rubber(raw)
+            local moved = math.abs(raw - motion.startPos) >= SWIPE
+            -- In combat nothing can coast after the finger lifts, so the flick is folded into
+            -- where the secure release will put the ring: a fast flick lands further on.
+            local ahead = motion.ghosts and Velocity() * 0.30 or 0
+            Track(Nearest(raw + ahead), moved)
         end
     else
         local left = math.min(elapsed, 1 / 20)
@@ -432,6 +461,7 @@ local function PressStarted()
     end
     motion.downAngle = ns.FanCursorAngle()
     motion.raw = motion.startPos
+    Track(Nearest(motion.startPos), false)
     motion.vel = 0
     wipe(motion.samples)
     motion.mode = "drag"
@@ -496,6 +526,7 @@ function Fan:Init()
     holder:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT")
     holder:SetSize(2, 2)
     holder:EnableMouse(false)
+    holder:SetFrameRef("motion", tracker)
     for index = 1, COUNT do
         local button = ns.CreateActionButton("WolkaraMobileFan1Skill" .. index, holder, fan.size,
             function() return Settings().pages[1][index] end,
@@ -512,8 +543,11 @@ function Fan:Init()
         button:HookScript("OnMouseUp", function()
             PressEnded()
             if ns.fanDebug then
-                ns.Print(("fan up: swiped=%s offset=%s raw=%s"):format(tostring(holder:GetAttribute("swiped")),
-                    tostring(holder:GetAttribute("offset")), tostring(motion.raw)))
+                ns.Print(("fan up: path=%s swiped=%s offset=%s tracked=%s moved=%s down=%s up=%s combat=%s"):format(
+                    tostring(holder:GetAttribute("lastpath")), tostring(holder:GetAttribute("swiped")),
+                    tostring(holder:GetAttribute("offset")), tostring(tracker:GetAttribute("target")),
+                    tostring(tracker:GetAttribute("moved")), tostring(holder:GetAttribute("downangle")),
+                    tostring(holder:GetAttribute("upangle")), tostring(InCombatLockdown())))
             end
         end)
         holder:SetFrameRef("b" .. index, button)
