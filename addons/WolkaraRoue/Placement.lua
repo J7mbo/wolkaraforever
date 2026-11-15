@@ -19,8 +19,12 @@ local function Large()
     local db = ns.db
     if type(db.windows) ~= "table" then db.windows = {} end
     if db.windows.size == nil then db.windows.size = "large" end
+    if type(db.windows.zoom) ~= "number" then db.windows.zoom = 100 end
     return db.windows.size == "large"
 end
+-- How much larger than the game draws them the windows may grow, when there is room: the
+-- game sizes them for a desktop screen, which on a phone leaves them small.
+local function Zoom() Large(); return ns.Clamp(ns.db.windows.zoom, 100, 200) / 100 end
 Placement.Settings = function() Large(); return ns.db.windows end
 
 local function Areas(W, H)
@@ -71,10 +75,10 @@ local function Fit(frame)
     local W, H = UIParent:GetWidth(), UIParent:GetHeight()
     local scale, area
     if WHOLE_SCREEN[frame:GetName() or ""] then
-        scale = math.min(natural[frame] * parentScale, (W - 2 * EDGE) / (width + right), (H - 2 * EDGE) / (height + top))
+        scale = math.min(natural[frame] * parentScale * Zoom(), (W - 2 * EDGE) / (width + right), (H - 2 * EDGE) / (height + top))
         area = { left = EDGE, right = EDGE, top = EDGE, bottom = EDGE }
     else
-        scale, area = Placement.Best(W, H, width + right, height + top, natural[frame] * parentScale)
+        scale, area = Placement.Best(W, H, width + right, height + top, natural[frame] * parentScale * Zoom())
     end
     busy = true
     if math.abs(frame:GetScale() - scale / parentScale) > 0.001 then frame:SetScale(scale / parentScale) end
