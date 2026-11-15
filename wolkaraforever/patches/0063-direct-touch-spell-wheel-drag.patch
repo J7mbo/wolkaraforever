@@ -1,0 +1,171 @@
+# WolkaraForever layer patch 0063 - mobile interface: a drag around the spell wheel turns it
+#
+# Why: the WolkaraRoue spell wheel sits in a ring around the screen's bottom-right corner.
+# In combat the game lets an add-on move its spell buttons only in answer to a click or a
+# mouse wheel, never to a drag, so a finger could not spin it in a fight. A finger that comes
+# down on that ring and moves is now sent as wheel notches - one per spell, 18 degrees of
+# travel around the corner - with the pointer resting where the finger came down, which is
+# where the wheel listens. A flick keeps turning for a moment after the finger lifts. A tap
+# there is still a tap and a hold still a right click; only a drag changes.
+#
+# Gated: direct touch in the mobile interface only, and WolkaraForeverWheelDragV1 = NO turns
+# it off and gives the corner back to the camera.
+#
+# Applies to: translation/AppKit/AppKit.m (after 0055).
+# Upstream: no (it serves one add-on's layout).
+#
+diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
+index 32095d0..edf726b 100644
+--- a/translation/AppKit/AppKit.m
++++ b/translation/AppKit/AppKit.m
+@@ -317,6 +317,14 @@ static BOOL AKMobileInterface(void) {
+     BOOL _directMulti;
+     CGFloat _pinchScale, _pinchCarry;
+     UIPinchGestureRecognizer *_pinch;
++    // The spell wheel in the bottom-right corner: whether this finger came down on its ring,
++    // whether the drag is turning it, the angle and the part of a notch not yet sent, how fast
++    // it was turning, and the coast that carries a flick on after the finger lifts.
++    BOOL _spinCandidate, _directSpin;
++    CGFloat _spinAngle, _spinCarry, _spinVelocity;
++    NSTimeInterval _spinTime;
++    NSTimer *_spinCoast;
++    UISelectionFeedbackGenerator *_spinTick;
+ }
+ - (BOOL)ak_needsTrackingEvents { return _touchControls.configuring || _touchControls.keyboardVisible || _pressedLeft || _pressedRight || _pressedMiddle; }
+ - (instancetype)initWithFrame:(CGRect)f {
+@@ -706,6 +714,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+ - (void)beginDirectMulti {
+     [self cancelDirectHold];
+     _directPending = NO; _directHeld = NO; _directMulti = YES;
++    _directSpin = NO; [self stopWheelCoast];
+     if (_pressedLeft) [self postMouse:NSEventTypeLeftMouseUp at:_last button:0];
+     if (_pressedRight) [self postMouse:NSEventTypeRightMouseUp at:_last button:1];
+ }
+@@ -737,6 +746,82 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+         [self postScrollNotch:direction];
+     }
+ }
++// The spell wheel (WolkaraRoue) is a ring of spells around the screen's bottom-right corner.
++// The game only lets an add-on turn it in combat from a click or a mouse wheel, so a finger
++// dragged around that ring is sent as wheel notches - one per spell, 18 degrees - with the
++// pointer resting on the spell the finger came down on, where the wheel listens. A tap there
++// is still a tap. On by default in the mobile interface; WolkaraForeverWheelDragV1 = NO
++// turns it off and gives the corner back to the camera.
++static const CGFloat AKWheelStep = 18;
++static const CGFloat AKWheelInner = 0.17, AKWheelOuter = 0.52;   // of the view's height
++static const CGFloat AKWheelFriction = 3.2, AKWheelCoastMin = 45, AKWheelFlick = 90;
++static BOOL AKWheelDragEnabled(void) {
++    id value = [NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraForeverWheelDragV1"];
++    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
++}
++// Degrees around the bottom-right corner: 0 along the bottom edge, 90 up the right edge.
++static CGFloat AKWheelAngle(CGSize size, CGPoint point) {
++    return atan2(size.height - point.y, size.width - point.x) * 180.0 / M_PI;
++}
++static BOOL AKWheelRing(CGSize size, CGPoint point) {
++    CGFloat distance = hypot(size.width - point.x, size.height - point.y);
++    return size.height > 0 && distance >= size.height * AKWheelInner && distance <= size.height * AKWheelOuter;
++}
++// Turn the angle travelled into notches. Turning towards the right edge brings the earlier
++// spells back, which on the wheel is a notch up.
++- (void)spinBy:(CGFloat)degrees {
++    _spinCarry += degrees;
++    while (fabs(_spinCarry) >= AKWheelStep) {
++        CGFloat direction = _spinCarry > 0 ? 1 : -1;
++        _spinCarry -= direction * AKWheelStep;
++        [self postScrollNotch:direction];
++        [_spinTick selectionChanged];
++        [_spinTick prepare];
++    }
++}
++- (void)stopWheelCoast { [_spinCoast invalidate]; _spinCoast = nil; }
++- (void)beginWheelSpinAt:(CGPoint)point {
++    (void)point;
++    [self cancelDirectHold];
++    _directPending = NO; _directSpin = YES;
++    _spinAngle = AKWheelAngle(self.bounds.size, _directStart);
++    _spinCarry = 0; _spinVelocity = 0; _spinTime = NSProcessInfo.processInfo.systemUptime;
++    if (!_spinTick) _spinTick = [UISelectionFeedbackGenerator new];
++    [_spinTick prepare];
++    AKLog(@"direct touch: drag on the spell wheel turns it");
++}
++- (void)followWheelSpinTo:(CGPoint)point {
++    CGSize size = self.bounds.size;
++    // Too close to the corner the angle means nothing; wait for the finger to come back out.
++    if (hypot(size.width - point.x, size.height - point.y) < size.height * 0.06) return;
++    CGFloat angle = AKWheelAngle(size, point), delta = angle - _spinAngle;
++    _spinAngle = angle;
++    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime, dt = now - _spinTime;
++    _spinTime = now;
++    if (dt > 0.001) _spinVelocity = 0.6 * (delta / dt) + 0.4 * _spinVelocity;
++    [self spinBy:delta];
++}
++// A flick keeps turning after the finger lifts, slowing as the wheel's own coast does.
++- (void)endWheelSpin {
++    _directSpin = NO;
++    NSTimeInterval idle = NSProcessInfo.processInfo.systemUptime - _spinTime;
++    if (idle > 0.08 || fabs(_spinVelocity) < AKWheelFlick) { _spinCarry = 0; return; }
++    [self stopWheelCoast];
++    __block NSTimeInterval last = NSProcessInfo.processInfo.systemUptime, started = last;
++    __weak AKHostView *weakSelf = self;
++    _spinCoast = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) {
++        AKHostView *view = weakSelf;
++        if (!view) { [timer invalidate]; return; }
++        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime, dt = now - last;
++        last = now;
++        [view spinBy:view->_spinVelocity * dt];
++        view->_spinVelocity *= exp(-AKWheelFriction * dt);
++        if (fabs(view->_spinVelocity) < AKWheelCoastMin || now - started > 1.5) {
++            view->_spinCarry = 0; [view stopWheelCoast];
++        }
++    }];
++    [NSRunLoop.mainRunLoop addTimer:_spinCoast forMode:NSRunLoopCommonModes];
++}
+ - (BOOL)directGestureActive { return _directTouch != nil || _directMulti; }
+ - (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
+     if ([self handleTrackpadTouches:t event:ev]) return;
+@@ -747,6 +832,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+         _directTouch = t.anyObject;
+         _last = [_directTouch locationInView:self];
+         _directStart = _last; _directPending = YES; _directHeld = NO;
++        [self stopWheelCoast];
++        _directSpin = NO;
++        _spinCandidate = AKWheelDragEnabled() && AKWheelRing(self.bounds.size, _last);
+         // The pointer moves under the finger first, so the game knows what is there before
+         // any button is pressed.
+         [self postMouse:NSEventTypeMouseMoved at:_last button:0];
+@@ -769,8 +857,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+     if ([self directGestureActive]) {
+         if (_directMulti || ![t containsObject:_directTouch]) return;
+         CGPoint point = [_directTouch locationInView:self];
++        if (_directSpin) { [self followWheelSpinTo:point]; return; }
+         if (_directPending || _directHeld) {
+             if (hypot(point.x - _directStart.x, point.y - _directStart.y) < AKDirectSlop) return;
++            if (_directPending && _spinCandidate) {
++                [self beginWheelSpinAt:point];
++                [self followWheelSpinTo:point];
++                return;
++            }
+             [self cancelDirectHold];
+             BOOL turn = _directHeld;
+             _directPending = NO; _directHeld = NO;
+@@ -798,7 +892,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+         if (!_directMulti && [t containsObject:_directTouch]) {
+             [self cancelDirectHold];
+             CGPoint point = [_directTouch locationInView:self];
+-            if (_directPending) {
++            if (_directSpin) {
++                [self endWheelSpin];
++            } else if (_directPending) {
+                 _directPending = NO;
+                 [self postMouse:NSEventTypeLeftMouseDown at:_directStart button:0];
+                 [self postMouse:NSEventTypeLeftMouseUp at:_directStart button:0];
+@@ -821,7 +917,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+     if ([self directGestureActive]) {
+         // A cancelled gesture clicks nothing; whatever it held is let go.
+         [self cancelDirectHold];
+-        _directPending = NO; _directHeld = NO;
++        _directPending = NO; _directHeld = NO; _directSpin = NO;
+         if (_pressedLeft) [self postMouse:NSEventTypeLeftMouseUp at:_last button:0];
+         if (_pressedRight) [self postMouse:NSEventTypeRightMouseUp at:_last button:1];
+         if ([t containsObject:_directTouch]) _directTouch = nil;
