@@ -323,6 +323,9 @@ local function Render(pos)
                 button:SetAlpha(BaseAlpha(button) * fade)
                 button:Show()
             else
+                -- Hidden spells keep their full look: in combat the game shows them again
+                -- without this code, and a half-faded one would look greyed out.
+                button:SetAlpha(BaseAlpha(button))
                 button:Hide()
             end
         end
