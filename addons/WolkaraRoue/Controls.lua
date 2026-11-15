@@ -105,8 +105,6 @@ local function General(page)
     y = Row(page, y, ns.T("Windows"))
     Switch(page, X2, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().size == "large" end,
         function(v) if ns.Placement then ns.Placement.Settings().size = v and "large" or "fit" end end, ns.T("Large"), ns.T("Fit"), 150)
-    Stepper(page, X2 + 160, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().zoom or 100 end,
-        function(v) if ns.Placement then ns.Placement.Settings().zoom = v end end, 10, 100, 200, ns.T("%"))
     y = Row(page, y, ns.T("Positions"))
     Button(page, X2, y + ROW_H, ns.T("Customize"), 150, function() panel:Hide(); ns.SetEditing(true) end)
     Button(page, X3, y + ROW_H, ns.T("Reset positions"), 180, function()
@@ -117,17 +115,6 @@ local function General(page)
     end)
     y = Row(page, y, ns.T("Tips"))
     Button(page, X2, y + ROW_H, ns.T("Show tips"), 150, function() panel:Hide(); if ns.ShowTips then ns.ShowTips() end end)
-    -- The game's own frame cap (maxFPS), saved by the game in Config.wtf like any setting.
-    -- A lower cap keeps the phone cooler and the battery fuller.
-    y = Row(page, y, ns.T("Max FPS"))
-    local function getCVar(name) return (C_CVar and C_CVar.GetCVar or GetCVar)(name) end
-    local function setCVar(name, value) pcall(C_CVar and C_CVar.SetCVar or SetCVar, name, tostring(value)) end
-    Stepper(page, X2, y + ROW_H, function()
-        return ns.Clamp(tonumber(getCVar("maxFPS")) or 60, 10, 120)
-    end, function(v)
-        setCVar("useMaxFPS", 1)
-        setCVar("maxFPS", v)
-    end, 5, 10, 120)
 end
 
 local function Combat(page)
@@ -186,6 +173,25 @@ local function Chat(page)
         function(v) if ns.ChatTab then ns.ChatTab.Settings().enabled = v end end, ns.T("Button"), ns.T("Strip"), 120)
 end
 
+-- The iPhone Duo layout's fans: fan 1 is always there (the Skill fan switch on the Combat page
+-- turns the whole thing off); the others can be switched on, and each has its own number of
+-- spells. With more than one on, a button by the wheel switches between them.
+local function Fans(page)
+    local y = 0
+    Text(page, ns.T("Switch fans with the button above the wheel's 1-5."), X1, y, "GameFontHighlightSmall")
+    y = y - 28
+    local Fan = ns.Fan
+    for index = 1, Fan.FANS do
+        local function settings() return Fan.Settings().fans[index] end
+        y = Row(page, y, ns.T("Fan") .. " " .. index)
+        if index > 1 then
+            Switch(page, X2, y + ROW_H, function() return settings().on end, function(v) settings().on = v end, nil, nil, 70)
+        end
+        Stepper(page, X2 + 80, y + ROW_H, function() return settings().count end, function(v) settings().count = v end,
+            1, Fan.MIN_COUNT, Fan.COUNT)
+    end
+end
+
 local function Wheels(page)
     local y = 0
     Text(page, ns.T("Used by the Standard layout."), X1, y, "GameFontHighlightSmall")
@@ -231,7 +237,19 @@ local function Build()
     Combat(Page("combat", ns.T("Combat"), 2))
     Frames(Page("frames", ns.T("Frames"), 3))
     Chat(Page("chat", ns.T("Chat"), 4))
-    Wheels(Page("wheels", ns.T("Spell wheels"), 5))
+    -- One page for the wheels of whichever layout is on: the Duo layout's fans, or the
+    -- Standard layout's wheels and spell arcs. The other layout's settings stay out of sight.
+    local wheelsPage = Page("wheels", ns.T("Spell wheels"), 5)
+    local duoPane, standardPane = CreateFrame("Frame", nil, wheelsPage), CreateFrame("Frame", nil, wheelsPage)
+    duoPane:SetAllPoints(wheelsPage); standardPane:SetAllPoints(wheelsPage)
+    Fans(duoPane)
+    Wheels(standardPane)
+    updaters[#updaters + 1] = function()
+        local duo = ns.DuoLayout()
+        duoPane:SetShown(duo); standardPane:SetShown(not duo)
+        local nav = navButtons.wheels
+        if nav and nav.text then nav.text:SetText(duo and ns.T("Fans") or ns.T("Spell wheels")) end
+    end
 
     local credits = ns.Label(panel, "GameFontHighlightSmall", CREDITS)
     credits:SetPoint("BOTTOMLEFT", 24, 22)

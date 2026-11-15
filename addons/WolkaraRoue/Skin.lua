@@ -153,7 +153,7 @@ local function Apply()
         end
     end
     for index = 1, 15 do
-        Skin.Ring(_G["WolkaraMobileFan1Skill" .. index])
+        for fan = 1, 4 do Skin.Ring(_G["WolkaraMobileFan" .. fan .. "Skill" .. index]) end
         Skin.Ring(_G["WolkaraMobileFanGhost" .. index])
     end
     for page = 1, 5 do
