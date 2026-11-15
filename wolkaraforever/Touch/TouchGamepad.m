@@ -103,6 +103,10 @@ CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity) {
 @end
 
 NSNotificationName const AKGamepadTapThroughNotification = @"AKGamepadTapThroughNotification";
+NSNotificationName const AKGamepadDragThroughNotification = @"AKGamepadDragThroughNotification";
+// A floating stick held still this long becomes a drag in the game: a scrollbar, the map, a
+// bag slot. A stick that moves before then is steering, as always.
+static const NSTimeInterval AKStickGrabHold = 0.45;
 @interface AKGamepadStick : UIControl
 @property(nonatomic, copy) NSString *element;
 @property(nonatomic, readonly) CGPoint position;
@@ -148,6 +152,29 @@ static const CGFloat AKAutoRunArm = 60;
     CGPoint _tapLast;
     CGFloat _tapTravel;
     BOOL _tapMoved;
+    // Hold-then-drag: whether this finger now drags in the game instead of steering, which
+    // pending hold it belongs to, and where it last was (window coordinates).
+    BOOL _grabbing;
+    NSUInteger _grabGeneration;
+    CGPoint _grabLast;
+}
+- (void)postGrab:(NSString *)phase at:(CGPoint)point {
+    _grabLast = point;
+    [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadDragThroughNotification object:self
+        userInfo:@{@"phase": phase, @"x": @(point.x), @"y": @(point.y)}];
+}
+// The finger stayed put for the whole hold: let go of the stick and press in the game there.
+- (void)beginGrabAt:(CGPoint)point {
+    _grabbing = YES;
+    [self setAutoStage:0];
+    [self updatePosition:CGPointZero];
+    if (_floating) self.superview.alpha = _idleAlpha > 0 ? _idleAlpha : 0.02;
+    [self postGrab:@"began" at:point];
+}
+- (void)endGrab {
+    if (!_grabbing) return;
+    _grabbing = NO;
+    [self postGrab:@"ended" at:_grabLast];
 }
 - (void)setAutoStage:(NSInteger)stage {
     if (_autoStage == stage) return;
@@ -206,6 +233,18 @@ static const CGFloat AKAutoRunArm = 60;
     _tapLast = [touch locationInView:self];
     _tapTravel = 0;
     _tapMoved = NO;
+    _grabbing = NO;
+    NSUInteger grab = ++_grabGeneration;
+    if (_floating) {
+        CGPoint start = [touch locationInView:nil];
+        __weak AKGamepadStick *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AKStickGrabHold * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            AKGamepadStick *stick = weakSelf;
+            if (!stick || stick->_grabGeneration != grab || !stick->_held || stick->_tapMoved || stick->_grabbing ||
+                !stick->_floating || stick->_autoRunning) return;
+            [stick beginGrabAt:start];
+        });
+    }
     if (_autoRunning) { _autoRunning = NO; [self setAutoStage:0]; }
     if (_floating && ring.superview) {
         ring.center = [touch locationInView:ring.superview];
@@ -215,6 +254,7 @@ static const CGFloat AKAutoRunArm = 60;
 }
 - (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)event;
+    if (_grabbing) { [self postGrab:@"moved" at:[touch locationInView:nil]]; return YES; }
     CGPoint point = [touch locationInView:self];
     _tapTravel += hypot(point.x - _tapLast.x, point.y - _tapLast.y);
     _tapLast = point;
@@ -227,6 +267,13 @@ static const CGFloat AKAutoRunArm = 60;
 }
 - (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)event;
+    _grabGeneration++;
+    if (_grabbing) {
+        if (touch) _grabLast = [touch locationInView:nil];
+        [self endGrab];
+        [self reset]; [self fadeOut];
+        return;
+    }
     _held = NO;
     BOOL tap = !_tapMoved && _tapTravel <= AKStickTapTravel && touch &&
         isfinite(touch.timestamp) && isfinite(_tapStarted) &&
@@ -248,6 +295,8 @@ static const CGFloat AKAutoRunArm = 60;
 }
 - (void)cancelTrackingWithEvent:(UIEvent *)event {
     (void)event;
+    _grabGeneration++;
+    [self endGrab];
     _held = NO;
     _tapMoved = YES;   // cancelled is never a tap
     [self reset]; [self fadeOut];
@@ -256,6 +305,8 @@ static const CGFloat AKAutoRunArm = 60;
 - (void)reset {
     // Every reset is a release: the overlay resets on settings, on the keyboard and when the
     // controls hide, and a stick that kept _held would refuse the next finger.
+    _grabGeneration++;
+    [self endGrab];
     _held = NO; _autoRunning = NO; _forwardSince = 0; _stoppedRun = NO;
     [self setAutoStage:0];
     [self updatePosition:CGPointZero];
