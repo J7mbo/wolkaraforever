@@ -730,6 +730,9 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
     _leftStick.idleAlpha = _rightStick.idleAlpha = AKFloatIdleAlpha;
     if (floating && !_leftStick.held) _items[@"left"].alpha = AKFloatIdleAlpha;
     if (floating && !_rightStick.held) _items[@"right"].alpha = AKFloatIdleAlpha;
+    // Floating, the jump is the screen's corner (floatingHit), not the arc under the camera
+    // stick: that spot belongs to the stick, so the arc is not drawn there.
+    _jumpButton.alpha = floating ? 0 : 1;
     if (!floating) { _autoLock.hidden = YES; _autoBadge.hidden = YES; }
     [self setNeedsLayout];
 }
