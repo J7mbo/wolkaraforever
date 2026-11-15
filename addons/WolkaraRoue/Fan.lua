@@ -166,32 +166,14 @@ function ns.HoldToSwap(button, onHeld, slot)
     end)
 end
 
--- The finger's angle around the corner, in the secure environment: the same arctangent the
--- insecure side uses, as a polynomial, because the restricted environment has no math library.
-local ANGLE = [=[
-    local x, y = owner:GetMousePosition()
-    local angle
-    if x then
-        local size = owner:GetAttribute("size")
-        local dx, dy = (1 - x) * size, y * size
-        if dx <= 0 then angle = 90
-        else
-            local t = dy / dx
-            local inverse = t > 1
-            if inverse then t = 1 / t end
-            local a = 45 * t + 15.64 * t * (1 - t)
-            if inverse then a = 90 - a end
-            angle = a
-        end
-    end
-]=]
-
+-- The secure side. In combat only this code may move the spell buttons, and it runs only when
+-- a button is pressed, released and clicked. It uses nothing but which button was pressed and
+-- which button the finger is over now (IsUnderMouse on the buttons themselves): the finger's
+-- exact position and plain frames' data are not available to it on every client.
 local DOWN = [=[
-    owner:SetAttribute("swiped", nil)
-    owner:SetAttribute("travel", 0)
-    owner:SetAttribute("downoffset", owner:GetAttribute("offset"))
-]=] .. ANGLE .. [=[
-    owner:SetAttribute("downangle", angle)
+    owner:SetAttribute("dragmoved", nil)
+    owner:SetAttribute("downindex", self:GetAttribute("ringindex"))
+    owner:SetAttribute("lastpath", "down")
 ]=]
 
 -- Places every button for a whole-number offset: in view at its slot's precomputed position,
@@ -212,57 +194,44 @@ local PLACE = [=[
     end
 ]=]
 
--- On release: how many slots the finger travelled, rounded to the nearest spell and kept inside
--- the ring. Rounding by comparison, because there is no math.floor here.
+-- On release: the finger pressed one spell and let go over another, so the ring turns by the
+-- difference, keeping the pressed spell under the finger. Out of combat the real buttons have
+-- followed the finger, the pressed one is still under it, and this does nothing.
 local UP = [=[
-    -- The ring's own tracking, kept up to date every frame of the drag on a plain frame the
-    -- secure code can read: where the finger has turned the ring to, and whether it moved at
-    -- all. It is only data - the secure code still does the placing.
-    local motion = owner:GetFrameRef("motion")
-    local tracked = motion and motion:GetAttribute("target")
-    owner:SetAttribute("lastpath", tracked and "tracked" or "angle")
-    if tracked then
-        if not motion:GetAttribute("moved") then return end
-        owner:SetAttribute("swiped", true)
-        local most = owner:GetAttribute("most")
-        if tracked < 0 then tracked = 0 elseif tracked > most then tracked = most end
-        owner:SetAttribute("offset", tracked)
-]=] .. PLACE .. [=[
-        return
+    local downIndex = owner:GetAttribute("downindex")
+    local offset = owner:GetAttribute("offset") or 0
+    local shown = owner:GetAttribute("shown")
+    local upIndex
+    for index = offset + 1, offset + shown do
+        local button = owner:GetFrameRef("b" .. index)
+        if button and button:IsUnderMouse() then upIndex = index; break end
     end
-]=] .. ANGLE .. [=[
-    local from = owner:GetAttribute("downangle")
-    owner:SetAttribute("upangle", angle)
-    if not angle or not from then return end
-    local turns = (from - angle) / owner:GetAttribute("step")
-    if turns < ]=] .. SWIPE .. [=[ and turns > -]=] .. SWIPE .. [=[ then return end
+    owner:SetAttribute("lastpath", "up:" .. tostring(downIndex) .. ">" .. tostring(upIndex))
+    if not downIndex or not upIndex or upIndex == downIndex then return end
     owner:SetAttribute("swiped", true)
-    local wanted = (owner:GetAttribute("downoffset") or 0) + turns
+    local wanted = offset - (upIndex - downIndex)
     local most = owner:GetAttribute("most")
-    local best, distance = 0, nil
-    for n = 0, most do
-        local d = n - wanted
-        if d < 0 then d = -d end
-        if not distance or d < distance then best, distance = n, d end
-    end
-    owner:SetAttribute("offset", best)
+    if wanted < 0 then wanted = 0 elseif wanted > most then wanted = most end
+    owner:SetAttribute("offset", wanted)
 ]=] .. PLACE
 
--- The click decides for itself whether the finger travelled, from the press it shares with
--- the release. The game does not promise which of OnMouseUp and OnClick runs first, so a flag
--- left by the release cannot be trusted here: when the click came first, every spin cast the
--- spell it ended on (and the flag then swallowed the next real tap).
+-- A click casts only after a tap: not after the ring was dragged (the insecure side says so out
+-- of combat, where it may still write to the secure frame), and not when the finger ended over
+-- something other than the spell it pressed (combat, where the buttons stayed put).
 local CLICK = [=[
-    local motion = owner:GetFrameRef("motion")
-    if motion and motion:GetAttribute("moved") then return false end
-    local from = owner:GetAttribute("downangle")
-    owner:SetAttribute("swiped", nil)
-    if not from then return end
-]=] .. ANGLE .. [=[
-    -- A release away from the ring entirely is a drag that left it, never a tap.
-    if not angle then return false end
-    local turns = (from - angle) / owner:GetAttribute("step")
-    if turns >= ]=] .. SWIPE .. [=[ or turns <= -]=] .. SWIPE .. [=[ then return false end
+    if owner:GetAttribute("dragmoved") then
+        owner:SetAttribute("dragmoved", nil)
+        return false
+    end
+    -- Ended over a different spell than the one pressed: that was a drag in combat. Over no
+    -- spell at all is let through, because a tap at the edge of a spell is inside its enlarged
+    -- touch area but outside the frame IsUnderMouse measures.
+    local pressed = owner:GetAttribute("downindex")
+    local offset = owner:GetAttribute("offset") or 0
+    for index = offset + 1, offset + owner:GetAttribute("shown") do
+        local button = owner:GetFrameRef("b" .. index)
+        if index ~= pressed and button and button:IsUnderMouse() then return false end
+    end
 ]=]
 
 -- ---------------------------------------------------------------------------------------
@@ -270,11 +239,11 @@ local CLICK = [=[
 -- fraction is between two spells. Everything below is insecure and only draws.
 
 local geometry = { outer = 100, size = 56 }
--- Not secure, so it can be written in combat; the secure release reads it (see UP).
-local tracker = CreateFrame("Frame", "WolkaraMobileFanTracker", UIParent)
-local function Track(target, moved)
-    tracker:SetAttribute("target", target)
-    tracker:SetAttribute("moved", moved and true or nil)
+-- Out of combat, tell the secure click that the ring was dragged, so it does not cast.
+local function MarkDragged()
+    if not InCombatLockdown() and holder and not holder:GetAttribute("dragmoved") then
+        holder:SetAttribute("dragmoved", true)
+    end
 end
 local motion = { pos = 0, vel = 0, target = 0, mode = nil, ghosts = false, samples = {} }
 
@@ -434,11 +403,7 @@ driver:SetScript("OnUpdate", function(_, elapsed)
             motion.raw = raw
             Sample(raw)
             motion.pos = Rubber(raw)
-            local moved = math.abs(raw - motion.startPos) >= SWIPE
-            -- In combat nothing can coast after the finger lifts, so the flick is folded into
-            -- where the secure release will put the ring: a fast flick lands further on.
-            local ahead = motion.ghosts and Velocity() * 0.30 or 0
-            Track(Nearest(raw + ahead), moved)
+            if math.abs(raw - motion.startPos) >= SWIPE then MarkDragged() end
         end
     else
         local left = math.min(elapsed, 1 / 20)
@@ -461,7 +426,6 @@ local function PressStarted()
     end
     motion.downAngle = ns.FanCursorAngle()
     motion.raw = motion.startPos
-    Track(Nearest(motion.startPos), false)
     motion.vel = 0
     wipe(motion.samples)
     motion.mode = "drag"
@@ -526,7 +490,6 @@ function Fan:Init()
     holder:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT")
     holder:SetSize(2, 2)
     holder:EnableMouse(false)
-    holder:SetFrameRef("motion", tracker)
     for index = 1, COUNT do
         local button = ns.CreateActionButton("WolkaraMobileFan1Skill" .. index, holder, fan.size,
             function() return Settings().pages[1][index] end,
@@ -543,14 +506,14 @@ function Fan:Init()
         button:HookScript("OnMouseUp", function()
             PressEnded()
             if ns.fanDebug then
-                ns.Print(("fan up: path=%s swiped=%s offset=%s tracked=%s moved=%s down=%s up=%s combat=%s"):format(
+                ns.Print(("fan up: path=%s swiped=%s offset=%s dragged=%s raw=%s combat=%s"):format(
                     tostring(holder:GetAttribute("lastpath")), tostring(holder:GetAttribute("swiped")),
-                    tostring(holder:GetAttribute("offset")), tostring(tracker:GetAttribute("target")),
-                    tostring(tracker:GetAttribute("moved")), tostring(holder:GetAttribute("downangle")),
-                    tostring(holder:GetAttribute("upangle")), tostring(InCombatLockdown())))
+                    tostring(holder:GetAttribute("offset")), tostring(holder:GetAttribute("dragmoved")),
+                    tostring(motion.raw), tostring(InCombatLockdown())))
             end
         end)
         holder:SetFrameRef("b" .. index, button)
+        button:SetAttribute("ringindex", index)
         buttons[index] = button
     end
     for index = 1, COUNT do
