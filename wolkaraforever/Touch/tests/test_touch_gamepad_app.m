@@ -219,12 +219,16 @@ static void TestPreferences(void) {
     // Templates and saved arrangements: the layout is data the user can keep and come back to.
     [layout reset];
     assert([AKGamepadLayout templateNames].count==3);
+    assert(!layout.wheelArea && fabs(layout.wheelAreaSize-.52)<.001);   // no wheel area by default
     [layout applyTemplateNamed:@"plain"];
-    assert(!layout.sticksOnly && !layout.floatingSticks && layout.keepFree.count==0);
+    assert(!layout.sticksOnly && !layout.floatingSticks && layout.keepFree.count==0 && !layout.wheelArea);
     [layout applyTemplateNamed:@"duo"];
-    assert(layout.sticksOnly && layout.floatingSticks && layout.keepFree.count==0);
+    assert(layout.sticksOnly && layout.floatingSticks && layout.keepFree.count==0 && !layout.wheelArea);
     [layout applyTemplateNamed:@"duo-addon"];
-    assert(layout.floatingSticks && layout.keepFree.count==2);
+    assert(layout.floatingSticks && layout.keepFree.count==2 && layout.wheelArea);   // the add-on's spell wheel
+    [layout applyTemplateNamed:@"duo"];
+    assert(!layout.wheelArea);
+    [layout applyTemplateNamed:@"duo-addon"];
     assert([layout saveAsProfileNamed:@"test-setup"]);
     assert([[layout savedProfileNames] containsObject:@"test-setup"]);
     [layout applyTemplateNamed:@"plain"];
@@ -235,14 +239,16 @@ static void TestPreferences(void) {
     assert(![layout applyProfileNamed:@"test-setup"]);
     assert(![layout saveAsProfileNamed:@""]);
     // An arrangement from a hand-edited file cannot smuggle in an out-of-range value.
-    [layout applyArrangement:@{@"opacity":@99, @"keepFree":@[@{@"x":@(NAN),@"y":@0,@"w":@0.1,@"h":@0.1},
+    [layout applyArrangement:@{@"opacity":@99, @"wheelAreaSize":@5, @"keepFree":@[@{@"x":@(NAN),@"y":@0,@"w":@0.1,@"h":@0.1},
                                                             @{@"x":@0.5,@"y":@0.5,@"w":@0.2,@"h":@0.2}]}];
-    assert(layout.opacity==1 && layout.keepFree.count==1);
+    assert(layout.opacity==1 && layout.keepFree.count==1 && fabs(layout.wheelAreaSize-.75)<.001);
+    layout.wheelAreaSize=NAN; assert(fabs(layout.wheelAreaSize-.52)<.001);
+    layout.wheelAreaSize=.1; assert(fabs(layout.wheelAreaSize-.35)<.001);
     // Everything the user sets survives a relaunch and an app update: it is all in the saved
     // dictionary, and a newer version's unknown key does not erase it.
     layout.opacity=.55; layout.rearScale=1.4; layout.frontScale=.7; layout.hapticsEnabled=NO;
     layout.swapShoulders=NO; layout.performanceOverlayEnabled=YES; layout.sticksOnly=NO;
-    layout.floatingSticks=YES; [layout clearKeepFreeAreas];
+    layout.floatingSticks=YES; layout.wheelArea=YES; layout.wheelAreaSize=.6; [layout clearKeepFreeAreas];
     [layout addKeepFreeAreaWithX:0.1 y:0.2 width:0.3 height:0.4];
     [layout moveItem:@"menu" toFrame:CGRectMake(10,20,44,44) inBounds:bounds];
     [layout save];
@@ -250,6 +256,7 @@ static void TestPreferences(void) {
     assert(fabs(relaunched.opacity-.55)<.001 && fabs(relaunched.rearScale-1.4)<.001 &&
            fabs(relaunched.frontScale-.7)<.001 && !relaunched.hapticsEnabled && !relaunched.swapShoulders &&
            relaunched.performanceOverlayEnabled && !relaunched.sticksOnly && relaunched.floatingSticks);
+    assert(relaunched.wheelArea && fabs(relaunched.wheelAreaSize-.6)<.001);
     assert(relaunched.keepFree.count==1 && fabs(relaunched.keepFree[0][@"w"].doubleValue-0.3)<.001);
     assert(CGRectEqualToRect([relaunched frameForItem:@"menu" defaultFrame:frame inBounds:bounds],
                              [layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds]));
@@ -1184,20 +1191,37 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     CGPoint corner=CGPointMake(CGRectGetMaxX(b),CGRectGetMaxY(b));
     CGPoint nearCorner=[overlay convertPoint:CGPointMake(corner.x-0.05*h,corner.y-0.05*h) toView:host];
     assert([host hitTest:nearCorner withEvent:nil]==jump);
-    // The spell wheel's ring around the corner, just beyond the jump, is left to the game, so a
-    // tap there casts and a drag turns the wheel; WolkaraForeverWheelDragV1 = NO gives it back
-    // to the camera half.
-    CGFloat far=0.25*h;
-    CGPoint beyondJump=[overlay convertPoint:CGPointMake(corner.x-far*0.7071,corner.y-far*0.7071) toView:host];
-    assert([host hitTest:beyondJump withEvent:nil]==host);
-    [defaults setBool:NO forKey:@"WolkaraForeverWheelDragV1"];
+    // Nothing is reserved by default: the far corner beyond the jump is still the camera half.
+    CGPoint (^fromCorner)(CGFloat)=^CGPoint(CGFloat share) {
+        return [overlay convertPoint:CGPointMake(corner.x-share*h*0.7071,corner.y-share*h*0.7071) toView:host];
+    };
+    CGPoint beyondJump=fromCorner(0.25);
     assert([host hitTest:beyondJump withEvent:nil]==rightStick);
-    [defaults removeObjectForKey:@"WolkaraForeverWheelDragV1"];
+    // A layout with a spell wheel area leaves that ring to the game - a tap there casts and a
+    // drag turns the wheel - out to the size it sets; further out is the camera half again.
+    AKGamepadLayout *wheel=(id)[overlay valueForKey:@"preferences"];
+    wheel.wheelArea=YES;
     assert([host hitTest:beyondJump withEvent:nil]==host);
-    // Further out than the ring, the corner is the camera half again.
-    CGFloat beyond=0.60*h;
-    CGPoint beyondRing=[overlay convertPoint:CGPointMake(corner.x-beyond*0.7071,corner.y-beyond*0.7071) toView:host];
-    assert([host hitTest:beyondRing withEvent:nil]==rightStick);
+    assert([host hitTest:fromCorner(0.45) withEvent:nil]==host);
+    assert([host hitTest:fromCorner(0.60) withEvent:nil]==rightStick);
+    wheel.wheelAreaSize=0.40;
+    assert([host hitTest:beyondJump withEvent:nil]==host);
+    assert([host hitTest:fromCorner(0.45) withEvent:nil]==rightStick);
+    wheel.wheelAreaSize=0.52; wheel.wheelArea=NO;
+    assert([host hitTest:beyondJump withEvent:nil]==rightStick);
+    // The switch and the size are in the settings panel, beside the floating switch.
+    [manager toggleSettings];
+    UISwitch *wheelSwitch=(id)Find(host,@"wolkaraforever.controls.wheelArea");
+    UISlider *wheelSize=(id)Find(host,@"wolkaraforever.controls.wheelAreaSize");
+    assert(wheelSwitch && !wheelSwitch.on && wheelSize && !wheelSize.enabled);
+    wheelSwitch.on=YES; [wheelSwitch sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(wheelSize.enabled && wheelSize.accessibilityValue.length);
+    wheelSize.value=0.6; [wheelSize sendActionsForControlEvents:UIControlEventValueChanged];
+    AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:defaults];
+    assert(saved.wheelArea && fabs(saved.wheelAreaSize-0.6)<.01);
+    wheelSwitch.on=NO; [wheelSwitch sendActionsForControlEvents:UIControlEventValueChanged];
+    wheelSize.value=0.52; [wheelSize sendActionsForControlEvents:UIControlEventValueChanged];
+    [manager toggleSettings]; [host layoutIfNeeded];
     // Floating, the jump is the corner and its arc under the camera stick is not drawn.
     assert(jump.alpha==0);
     // The bottom centre belongs to neither thumb, so it is the game's - and an add-on's.

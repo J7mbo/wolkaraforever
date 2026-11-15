@@ -28,15 +28,16 @@ static NSMutableDictionary *StoredValues(NSUserDefaults *defaults) {
 
 // The starting points. "plain" is the fixed rings every release through v1.0.9 had; "duo" is
 // the mobile arrangement with nothing reserved; "duo-addon" reserves the left edge and the
-// bottom centre, where an installed interface usually puts a bar and a chat strip.
+// bottom centre, where an installed interface usually puts a bar and a chat strip, and leaves
+// the ring around the bottom-right corner to the spell wheel such an interface puts there.
 static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *Templates(void) {
     static NSDictionary *templates;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         templates = @{
-            @"plain": @{@"sticksOnly":@NO, @"floatingSticks":@NO, @"keepFree":@[]},
-            @"duo": @{@"sticksOnly":@YES, @"floatingSticks":@YES, @"keepFree":@[]},
-            @"duo-addon": @{@"sticksOnly":@YES, @"floatingSticks":@YES, @"keepFree":@[
+            @"plain": @{@"sticksOnly":@NO, @"floatingSticks":@NO, @"wheelArea":@NO, @"keepFree":@[]},
+            @"duo": @{@"sticksOnly":@YES, @"floatingSticks":@YES, @"wheelArea":@NO, @"keepFree":@[]},
+            @"duo-addon": @{@"sticksOnly":@YES, @"floatingSticks":@YES, @"wheelArea":@YES, @"keepFree":@[
                 @{@"x":@0.0, @"y":@0.30, @"w":@0.13, @"h":@0.70},
                 @{@"x":@0.28, @"y":@0.925, @"w":@0.44, @"h":@0.075},
             ]},
