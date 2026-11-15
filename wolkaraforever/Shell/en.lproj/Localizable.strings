@@ -441,9 +441,8 @@
 "touch.settings.moveSensitivity.value" = "Movement stick sensitivity · %.0f%%";
 "touch.settings.cameraSensitivity" = "Camera stick sensitivity";
 "touch.settings.cameraSensitivity.value" = "Camera stick sensitivity · %.0f%%";
-"touch.settings.wheelArea" = "Spell wheel area";
-"touch.settings.wheelAreaSize" = "Spell wheel area size";
-"touch.settings.wheelAreaSize.value" = "Spell wheel area size · %.0f%%";
+"touch.settings.wheelArea" = "Spell wheel";
+"touch.settings.wheelArea.hint" = "Drags on the wheel in the bottom-right corner turn it.";
 "touch.settings.outerTriggers" = "Triggers on the outside";
 "touch.settings.outerTriggers.simple" = "The simple layout has no triggers to move.";
 "touch.settings.sticksOnly" = "Sticks and jump only (hide the other buttons)";

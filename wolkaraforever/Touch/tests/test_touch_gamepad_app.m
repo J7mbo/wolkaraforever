@@ -219,7 +219,7 @@ static void TestPreferences(void) {
     // Templates and saved arrangements: the layout is data the user can keep and come back to.
     [layout reset];
     assert([AKGamepadLayout templateNames].count==3);
-    assert(!layout.wheelArea && fabs(layout.wheelAreaSize-.52)<.001);   // no wheel area by default
+    assert(!layout.wheelArea);   // no spell wheel by default
     [layout applyTemplateNamed:@"plain"];
     assert(!layout.sticksOnly && !layout.floatingSticks && layout.keepFree.count==0 && !layout.wheelArea);
     [layout applyTemplateNamed:@"duo"];
@@ -239,16 +239,14 @@ static void TestPreferences(void) {
     assert(![layout applyProfileNamed:@"test-setup"]);
     assert(![layout saveAsProfileNamed:@""]);
     // An arrangement from a hand-edited file cannot smuggle in an out-of-range value.
-    [layout applyArrangement:@{@"opacity":@99, @"wheelAreaSize":@5, @"keepFree":@[@{@"x":@(NAN),@"y":@0,@"w":@0.1,@"h":@0.1},
+    [layout applyArrangement:@{@"opacity":@99, @"keepFree":@[@{@"x":@(NAN),@"y":@0,@"w":@0.1,@"h":@0.1},
                                                             @{@"x":@0.5,@"y":@0.5,@"w":@0.2,@"h":@0.2}]}];
-    assert(layout.opacity==1 && layout.keepFree.count==1 && fabs(layout.wheelAreaSize-.75)<.001);
-    layout.wheelAreaSize=NAN; assert(fabs(layout.wheelAreaSize-.52)<.001);
-    layout.wheelAreaSize=.1; assert(fabs(layout.wheelAreaSize-.35)<.001);
+    assert(layout.opacity==1 && layout.keepFree.count==1);
     // Everything the user sets survives a relaunch and an app update: it is all in the saved
     // dictionary, and a newer version's unknown key does not erase it.
     layout.opacity=.55; layout.rearScale=1.4; layout.frontScale=.7; layout.hapticsEnabled=NO;
     layout.swapShoulders=NO; layout.performanceOverlayEnabled=YES; layout.sticksOnly=NO;
-    layout.floatingSticks=YES; layout.wheelArea=YES; layout.wheelAreaSize=.6; [layout clearKeepFreeAreas];
+    layout.floatingSticks=YES; layout.wheelArea=YES; [layout clearKeepFreeAreas];
     [layout addKeepFreeAreaWithX:0.1 y:0.2 width:0.3 height:0.4];
     [layout moveItem:@"menu" toFrame:CGRectMake(10,20,44,44) inBounds:bounds];
     [layout save];
@@ -256,7 +254,7 @@ static void TestPreferences(void) {
     assert(fabs(relaunched.opacity-.55)<.001 && fabs(relaunched.rearScale-1.4)<.001 &&
            fabs(relaunched.frontScale-.7)<.001 && !relaunched.hapticsEnabled && !relaunched.swapShoulders &&
            relaunched.performanceOverlayEnabled && !relaunched.sticksOnly && relaunched.floatingSticks);
-    assert(relaunched.wheelArea && fabs(relaunched.wheelAreaSize-.6)<.001);
+    assert(relaunched.wheelArea);
     assert(relaunched.keepFree.count==1 && fabs(relaunched.keepFree[0][@"w"].doubleValue-0.3)<.001);
     assert(CGRectEqualToRect([relaunched frameForItem:@"menu" defaultFrame:frame inBounds:bounds],
                              [layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds]));
@@ -1197,30 +1195,23 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     };
     CGPoint beyondJump=fromCorner(0.25);
     assert([host hitTest:beyondJump withEvent:nil]==rightStick);
-    // A layout with a spell wheel area leaves that ring to the game - a tap there casts and a
-    // drag turns the wheel - out to the size it sets; further out is the camera half again.
+    // A layout with the spell wheel on leaves its ring to the game - a tap there casts and a drag
+    // turns the wheel - out past the outermost spells; further out is the camera half again.
     AKGamepadLayout *wheel=(id)[overlay valueForKey:@"preferences"];
     wheel.wheelArea=YES;
     assert([host hitTest:beyondJump withEvent:nil]==host);
-    assert([host hitTest:fromCorner(0.45) withEvent:nil]==host);
-    assert([host hitTest:fromCorner(0.60) withEvent:nil]==rightStick);
-    wheel.wheelAreaSize=0.40;
-    assert([host hitTest:beyondJump withEvent:nil]==host);
-    assert([host hitTest:fromCorner(0.45) withEvent:nil]==rightStick);
-    wheel.wheelAreaSize=0.52; wheel.wheelArea=NO;
+    assert([host hitTest:fromCorner(0.55) withEvent:nil]==host);
+    assert([host hitTest:fromCorner(0.64) withEvent:nil]==rightStick);
+    wheel.wheelArea=NO;
     assert([host hitTest:beyondJump withEvent:nil]==rightStick);
-    // The switch and the size are in the settings panel, beside the floating switch.
+    // Its switch is in the settings panel, beside the floating switch, and says what it does.
     [manager toggleSettings];
     UISwitch *wheelSwitch=(id)Find(host,@"wolkaraforever.controls.wheelArea");
-    UISlider *wheelSize=(id)Find(host,@"wolkaraforever.controls.wheelAreaSize");
-    assert(wheelSwitch && !wheelSwitch.on && wheelSize && !wheelSize.enabled);
+    assert(wheelSwitch && !wheelSwitch.on && wheelSwitch.accessibilityHint.length);
     wheelSwitch.on=YES; [wheelSwitch sendActionsForControlEvents:UIControlEventValueChanged];
-    assert(wheelSize.enabled && wheelSize.accessibilityValue.length);
-    wheelSize.value=0.6; [wheelSize sendActionsForControlEvents:UIControlEventValueChanged];
-    AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:defaults];
-    assert(saved.wheelArea && fabs(saved.wheelAreaSize-0.6)<.01);
+    assert([[AKGamepadLayout alloc] initWithDefaults:defaults].wheelArea);
     wheelSwitch.on=NO; [wheelSwitch sendActionsForControlEvents:UIControlEventValueChanged];
-    wheelSize.value=0.52; [wheelSize sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(![[AKGamepadLayout alloc] initWithDefaults:defaults].wheelArea);
     [manager toggleSettings]; [host layoutIfNeeded];
     // Floating, the jump is the corner and its arc under the camera stick is not drawn.
     assert(jump.alpha==0);
@@ -1352,7 +1343,7 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     sticksOnly.on=NO; [sticksOnly sendActionsForControlEvents:UIControlEventValueChanged];
     [manager toggleSettings]; [host layoutIfNeeded];
     assert(jump.alpha==1);
-    puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump (its arc not drawn), the spell wheel's ring and the bottom centre are left to the game, a reserved area and the app's own buttons win over a half, a tap that stayed put is handed to the game and a held-then-moved stick drags in it, the touch that stops a run is neither, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
+    puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump (its arc not drawn), the bottom centre (and the spell wheel's ring, when the layout has it on) is left to the game, a reserved area and the app's own buttons win over a half, a tap that stayed put is handed to the game and a held-then-moved stick drags in it, the touch that stops a run is neither, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
 }
 // The sensitivity curve: full sensitivity is the stick as it is; lower values add a small dead
 // zone, soften small pushes and lower the top speed, keep the direction, and refuse nonsense.
