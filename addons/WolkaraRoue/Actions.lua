@@ -126,7 +126,16 @@ local function SecretCooldown(button, entry, start, duration, onGCD)
     if button.timer then button.timer:SetText("") end
     local known, global = pcall(function() return onGCD == true end)
     if cooldown.SetHideCountdownNumbers then cooldown:SetHideCountdownNumbers(known and global) end
-    button.icon:SetDesaturated(not (known and global))
+    -- In combat the game hides these numbers, so often it cannot be told whether this is the
+    -- global cooldown, a real one, or none at all. Grey the icon only when it is known to be a
+    -- real cooldown: a guess left spells greyed out that were ready to cast. The swipe still
+    -- shows any cooldown that is running.
+    local real = false
+    if known and not global then
+        local ok, long = pcall(function() return duration > GLOBAL_COOLDOWN end)
+        real = ok and long
+    end
+    button.icon:SetDesaturated(real)
     if not button.cooldownWatched then
         button.cooldownWatched = true
         cooldown:HookScript("OnCooldownDone", function() button.icon:SetDesaturated(false) end)
