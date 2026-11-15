@@ -1,16 +1,15 @@
 -- Corner skill wheel (iPhone Duo layout).
 --
--- One ring of fifteen spells around the bottom-right corner, five in view at a time. Drag a
--- spell along the arc and the ring follows the finger; flick it and it keeps spinning, slows
--- down and settles on a spell, with a bounce when it runs into either end. A tap without a drag
--- casts the spell under the finger.
+-- A ring of up to fifteen spells around the bottom-right corner, five in view at a time, and up
+-- to four such fans with a button to switch between them. Drag a spell along the arc and the
+-- ring follows the finger; flick it and it keeps spinning, slows down and settles on a spell,
+-- with a bounce when it runs into either end. A tap without a drag casts the spell under the
+-- finger.
 --
 -- Out of combat the real spell buttons are moved every frame, so what is drawn is exactly what
--- is tapped. In combat the game only lets its secure code move spell buttons, and that code
--- only sees the press and the release: the ring then follows the finger with plain icons
--- (`ghosts`) drawn over the hidden buttons, the secure code snaps the buttons to the nearest
--- spell when the finger lifts, and the icons spring to that same place. There is no flick
--- momentum in combat, because nothing secure can measure speed.
+-- is tapped. In combat the game only lets secure code move spell buttons, and only in answer to
+-- a click or a mouse wheel: each wheel tick turns the ring by one spell (the app turns a drag
+-- on the ring into wheel ticks), and the switch is a secure click.
 local _, ns = ...
 
 local Fan = ns.Register("Corner fan", {})
@@ -40,8 +39,8 @@ local SPRING, DAMPING = 220, 15
 -- How far past the visible arc a spell is still drawn while it fades, in slots.
 local FADE = 0.6
 
-local root, tab, jump, range, flash, holder, switch
-local buttons, ghosts = {}, {}
+local root, tab, jump, flash, holder, switch
+local buttons = {}
 -- Every fan's secure ring and buttons; `holder` and `buttons` are the fan on screen.
 local holders, fanButtons = {}, {}
 local active = 1
@@ -196,36 +195,26 @@ function ns.HoldToSwap(button, onHeld, slot)
     end)
 end
 
--- The secure side. In combat only this code may move the spell buttons, and it runs only when
--- a button is pressed, released and clicked. It uses nothing but which button was pressed and
--- which button the finger is over now (IsUnderMouse on the buttons themselves): the finger's
--- exact position and plain frames' data are not available to it on every client.
--- Each snippet works on `ring`: a fan's own buttons find it as their owner; the step button,
--- shared by every fan, looks up the fan on screen.
-local OWN = "local ring = owner\n"
-local ACTIVE = [=[
-    local ring = owner:GetFrameRef("fan" .. (owner:GetAttribute("active") or 1))
-    if not ring then return end
-]=]
+-- The secure side. In combat only this code may move the spell buttons, and it runs only in
+-- answer to a press, a click or a wheel tick. Each snippet works on the fan's own ring, the
+-- secure frame its buttons belong to (their owner).
 
-local DOWN = OWN .. [=[
-    ring:SetAttribute("dragmoved", nil)
-    ring:SetAttribute("swiped", nil)
-    ring:SetAttribute("downindex", self:GetAttribute("ringindex"))
-    ring:SetAttribute("lastpath", "down")
+-- A press starts with no drag recorded.
+local DOWN = [=[
+    owner:SetAttribute("dragmoved", nil)
 ]=]
 
 -- Places every button for a whole-number offset: in view at its slot's precomputed position,
 -- hidden otherwise. Arithmetic and attribute reads only.
 local PLACE = [=[
-    local offset = ring:GetAttribute("offset")
-    local shown = ring:GetAttribute("shown")
-    for index = 1, ring:GetAttribute("count") do
-        local button = ring:GetFrameRef("b" .. index)
+    local offset = owner:GetAttribute("offset")
+    local shown = owner:GetAttribute("shown")
+    for index = 1, owner:GetAttribute("count") do
+        local button = owner:GetFrameRef("b" .. index)
         local slot = index - offset
         if slot >= 1 and slot <= shown then
             button:ClearAllPoints()
-            button:SetPoint("CENTER", ring, "BOTTOMRIGHT", ring:GetAttribute("x" .. slot), ring:GetAttribute("y" .. slot))
+            button:SetPoint("CENTER", owner, "BOTTOMRIGHT", owner:GetAttribute("x" .. slot), owner:GetAttribute("y" .. slot))
             button:Show()
         else
             button:Hide()
@@ -233,66 +222,29 @@ local PLACE = [=[
     end
 ]=]
 
--- On release: the finger pressed one spell and let go over another, so the ring turns by the
--- difference, keeping the pressed spell under the finger. Out of combat the real buttons have
--- followed the finger, the pressed one is still under it, and this does nothing.
-local UP = OWN .. [=[
-    local downIndex = ring:GetAttribute("downindex")
-    local offset = ring:GetAttribute("offset") or 0
-    local shown = ring:GetAttribute("shown")
-    local upIndex
-    for index = offset + 1, offset + shown do
-        local button = ring:GetFrameRef("b" .. index)
-        if button and button:IsUnderMouse() then upIndex = index; break end
-    end
-    ring:SetAttribute("lastpath", "up:" .. (downIndex or -1) .. ">" .. (upIndex or -1))
-    if not downIndex or not upIndex or upIndex == downIndex then return end
-    ring:SetAttribute("swiped", true)
-    local wanted = offset - (upIndex - downIndex)
-    local most = ring:GetAttribute("most")
-    if wanted < 0 then wanted = 0 elseif wanted > most then wanted = most end
-    ring:SetAttribute("offset", wanted)
-]=] .. PLACE
-
--- A click casts only after a tap. It reads only flags on the ring's own secure frame: out of
--- combat the insecure side marks a drag there as it happens; in combat the secure release marks
--- a spin it turned the ring for. No other check here, so a tap can never be swallowed.
-local CLICK = OWN .. [=[
-    if ring:GetAttribute("dragmoved") or ring:GetAttribute("swiped") then
-        ring:SetAttribute("dragmoved", nil)
-        ring:SetAttribute("swiped", nil)
+-- A click casts only after a tap: out of combat the insecure side marks a drag on the ring's
+-- secure frame as it happens, and that click is dropped. No other check, so a tap can never be
+-- swallowed.
+local CLICK = [=[
+    if owner:GetAttribute("dragmoved") then
+        owner:SetAttribute("dragmoved", nil)
         return false
     end
 ]=]
 
--- The step button: one tap turns the ring to the next five spells, and from the last five back
--- to the first. A plain secure click, the one thing the game lets a page turn on in combat.
-local STEP_CLICK = ACTIVE .. [=[
-    local offset = ring:GetAttribute("offset") or 0
-    local most = ring:GetAttribute("most")
-    local shown = ring:GetAttribute("shown")
-    if offset >= most then offset = 0
-    elseif offset + shown > most then offset = most
-    else offset = offset + shown end
-    ring:SetAttribute("offset", offset)
-]=] .. PLACE
-
 -- The scroll wheel: each tick turns the ring by one spell, scrolling down for the later ones.
 -- Like a click, a wheel tick is an event the game lets secure code answer in combat. The tick's
 -- size arrives as "offset" (or "delta", depending on the client); either is read.
-local WHEEL_BODY = [=[
+local WHEEL = [=[
     local tick = delta or offset
     if not tick or tick == 0 then return end
-    local pos = ring:GetAttribute("offset") or 0
-    local most = ring:GetAttribute("most")
+    local pos = owner:GetAttribute("offset") or 0
+    local most = owner:GetAttribute("most")
     if tick < 0 then pos = pos + 1 else pos = pos - 1 end
     if pos < 0 then pos = 0 elseif pos > most then pos = most end
-    if pos == ring:GetAttribute("offset") then return end
-    ring:SetAttribute("offset", pos)
-    ring:SetAttribute("wheeled", (ring:GetAttribute("wheeled") or 0) + 1)
+    if pos == owner:GetAttribute("offset") then return end
+    owner:SetAttribute("offset", pos)
 ]=] .. PLACE
-local WHEEL = OWN .. WHEEL_BODY
-local STEP_WHEEL = ACTIVE .. WHEEL_BODY
 
 -- The switch button: the next fan that is on, in combat too. Only the fan rings are shown
 -- and hidden; each keeps its own turn.
@@ -324,7 +276,7 @@ local function MarkDragged()
         holder:SetAttribute("dragmoved", true)
     end
 end
-local motion = { pos = 0, vel = 0, target = 0, mode = nil, ghosts = false, samples = {} }
+local motion = { pos = 0, vel = 0, target = 0, mode = nil, samples = {} }
 
 local function Nearest(value)
     return ns.Clamp(math.floor(value + 0.5), 0, most)
@@ -351,32 +303,16 @@ local function BaseAlpha(button)
     return (button:GetEntry() or ns.editing or ns.slotEditing) and 1 or 0.35
 end
 
-local function SyncGhost(ghost, button)
-    local texture = button.icon:IsShown() and button.icon:GetTexture()
-    ghost.icon:SetTexture(texture or nil)
-    ghost.icon:SetShown(texture and true or false)
-    ghost.plus:SetShown(not texture)
-end
-
--- Draw the ring at `pos`: the ghosts in combat, the real buttons otherwise.
+-- Draw the ring at `pos` by moving the real buttons. Out of combat only: in combat the secure
+-- code has placed them.
 local function Render(pos)
     if not root then return end
     local size = geometry.size
     for index = 1, COUNT do
         local x, y, fade = Spot(index, pos)
         if index > count then fade = 0 end
-        local button, ghost = buttons[index], ghosts[index]
-        if motion.ghosts then
-            if fade > 0 then
-                ghost:ClearAllPoints()
-                ghost:SetSize(size, size)
-                ghost:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", x, y)
-                ghost:SetAlpha(BaseAlpha(button) * fade)
-                ghost:Show()
-            else
-                ghost:Hide()
-            end
-        elseif not InCombatLockdown() then
+        local button = buttons[index]
+        if not InCombatLockdown() then
             if fade > 0 then
                 button:ClearAllPoints()
                 button:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", x, y)
@@ -390,24 +326,6 @@ local function Render(pos)
             end
         end
     end
-    if range then
-        local first = Nearest(pos) + 1
-        range:SetText(first .. "-" .. math.min(count, first + SHOWN - 1) .. (most > 0 and " >" or ""))
-    end
-end
-
-local function ShowGhosts()
-    if motion.ghosts then return end
-    motion.ghosts = true
-    for index = 1, COUNT do SyncGhost(ghosts[index], buttons[index]) end
-    holder:SetAlpha(0)
-end
-
-local function HideGhosts()
-    if not motion.ghosts then return end
-    motion.ghosts = false
-    for index = 1, COUNT do ghosts[index]:Hide() end
-    holder:SetAlpha(1)
 end
 
 -- Out of combat, make the settled offset the secure one too, so the next swipe in combat starts
@@ -425,12 +343,7 @@ local function Finish()
     local target = motion.target
     local changed = target ~= motion.settledAt
     motion.mode, motion.pos, motion.vel = nil, target, 0
-    if motion.ghosts then
-        Render(target)
-        HideGhosts()
-    else
-        Commit(target)
-    end
+    Commit(target)
     motion.settledAt = target
     if changed then ns.FanFeedback() end
 end
@@ -440,17 +353,12 @@ local function SpringTo(target)
 end
 
 -- After a wheel tick: out of combat glide from where the ring was to where the secure side put
--- it; in combat the secure side has already placed the buttons, so only the label follows.
-function Fan.Wheeled(tick)
+-- it; in combat the secure side has already placed the buttons, so only the state follows.
+function Fan.Wheeled()
     local offset = holder:GetAttribute("offset") or 0
-    if ns.fanDebug then
-        ns.Print(("fan wheel: tick=%s offset=%s turns=%s combat=%s"):format(tostring(tick),
-            tostring(offset), tostring(holder:GetAttribute("wheeled")), tostring(InCombatLockdown())))
-    end
     if offset == motion.settledAt and offset == motion.target then return end
     if InCombatLockdown() then
         motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
-        if range then range:SetText((offset + 1) .. "-" .. math.min(count, offset + SHOWN) .. (most > 0 and " >" or "")) end
         local db = ns.db and ns.db.fan
         if type(db) == "table" and type(db.offsets) == "table" then db.offsets[active] = offset end
         ns.FanFeedback()
@@ -522,7 +430,7 @@ end)
 
 local function PressStarted()
     -- In combat the spells stay where the secure code put them and nothing is drawn over them:
-    -- what is on screen is always what a tap casts. The step button turns the ring there.
+    -- what is on screen is always what a tap casts. Wheel ticks turn the ring there.
     if InCombatLockdown() then motion.mode = nil; return end
     motion.startPos = motion.mode and motion.pos or (holder:GetAttribute("offset") or 0)
     motion.downAngle = ns.FanCursorAngle()
@@ -537,11 +445,7 @@ local function PressEnded()
     local raw = motion.raw or motion.startPos
     local moved = math.abs(raw - motion.startPos) >= SWIPE
     motion.vel = 0
-    if motion.ghosts then
-        -- The secure code has already placed the buttons; meet them there.
-        SpringTo(holder:GetAttribute("offset") or Nearest(raw))
-        motion.vel = Velocity() * 0.25
-    elseif not moved then
+    if not moved then
         SpringTo(Nearest(motion.startPos))
     else
         local speed = Velocity()
@@ -557,25 +461,10 @@ end
 -- Combat starts while the ring is still moving on its own: settle it now, while the game still
 -- allows its buttons to be placed.
 ns.On("PLAYER_REGEN_DISABLED", function()
-    if not holder or not motion.mode or motion.ghosts then return end
+    if not holder or not motion.mode then return end
     motion.target = motion.mode == "drag" and Nearest(motion.raw or motion.pos) or Nearest(motion.target or motion.pos)
     Finish()
 end)
-
-local function BuildGhost(index)
-    local ghost = CreateFrame("Frame", "WolkaraMobileFanGhost" .. index, root)
-    ghost:EnableMouse(false)
-    ns.Disc(ghost, "BACKGROUND", 0.05, 0.05, 0.08, 0.85, 4)
-    ghost.icon = ghost:CreateTexture(nil, "ARTWORK")
-    ghost.icon:SetAllPoints()
-    ghost.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    ns.Circle(ghost, ghost.icon)
-    ghost.plus = ns.Label(ghost, "GameFontNormalHuge", "+")
-    ghost.plus:SetPoint("CENTER")
-    ghost.plus:SetTextColor(0.55, 0.55, 0.55)
-    ghost:Hide()
-    return ghost
-end
 
 function Fan:Init()
     ns.DuoLayout()
@@ -600,28 +489,13 @@ function Fan:Init()
                 function() return Entries(fanIndex)[index] end,
                 function(entry) Entries(fanIndex)[index] = entry end)
             SecureHandlerWrapScript(button, "OnMouseDown", ring, DOWN)
-            SecureHandlerWrapScript(button, "OnMouseUp", ring, UP)
             SecureHandlerWrapScript(button, "OnClick", ring, CLICK)
             button:EnableMouseWheel(true)
             SecureHandlerWrapScript(button, "OnMouseWheel", ring, WHEEL)
-            button:HookScript("OnMouseWheel", function(_, tick) Fan.Wheeled(tick) end)
-            button:HookScript("OnMouseDown", function()
-                PressStarted()
-                if ns.fanDebug then
-                    ns.Print(("fan down: fan=%d offset=%s angle=%s"):format(fanIndex, tostring(ring:GetAttribute("offset")), tostring(motion.downAngle)))
-                end
-            end)
-            button:HookScript("OnMouseUp", function()
-                PressEnded()
-                if ns.fanDebug then
-                    ns.Print(("fan up: fan=%d path=%s swiped=%s offset=%s dragged=%s raw=%s combat=%s"):format(fanIndex,
-                        tostring(ring:GetAttribute("lastpath")), tostring(ring:GetAttribute("swiped")),
-                        tostring(ring:GetAttribute("offset")), tostring(ring:GetAttribute("dragmoved")),
-                        tostring(motion.raw), tostring(InCombatLockdown())))
-                end
-            end)
+            button:HookScript("OnMouseWheel", function() Fan.Wheeled() end)
+            button:HookScript("OnMouseDown", PressStarted)
+            button:HookScript("OnMouseUp", PressEnded)
             ring:SetFrameRef("b" .. index, button)
-            button:SetAttribute("ringindex", index)
             fanButtons[fanIndex][index] = button
         end
     end
@@ -649,11 +523,6 @@ function Fan:Init()
     end)
     Fan.switch = switch
 
-    for index = 1, COUNT do
-        ghosts[index] = BuildGhost(index)
-        ghosts[index]:SetFrameLevel(root:GetFrameLevel() + 8)
-    end
-
     jump = CreateFrame("Frame", "WolkaraMobileJumpArt", root)
     jump:EnableMouse(false)
     jump:SetFrameLevel(root:GetFrameLevel() + 1)
@@ -677,27 +546,6 @@ function Fan:Init()
     rise:SetFromAlpha(0); rise:SetToAlpha(0.28); rise:SetDuration(0.07); rise:SetOrder(1)
     local fall = flash.anim:CreateAnimation("Alpha")
     fall:SetFromAlpha(0.28); fall:SetToAlpha(0); fall:SetDuration(0.25); fall:SetOrder(2)
-    -- The range ("1-5 >") is a button: tap it to turn to the next five, in combat too.
-    local step = CreateFrame("Button", "WolkaraMobileFanStep", root, "SecureActionButtonTemplate")
-    step:RegisterForClicks("AnyUp")
-    ns.Box(step, "BACKGROUND", 0.05, 0.05, 0.08, 0.55)
-    SecureHandlerWrapScript(step, "OnClick", switch, STEP_CLICK)
-    step:HookScript("OnClick", function()
-        local offset = holder:GetAttribute("offset") or 0
-        motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
-        if not InCombatLockdown() then Commit(offset) else
-            range:SetText((offset + 1) .. "-" .. math.min(count, offset + SHOWN) .. (most > 0 and " >" or ""))
-        end
-        ns.FanFeedback()
-    end)
-    step:EnableMouseWheel(true)
-    SecureHandlerWrapScript(step, "OnMouseWheel", switch, STEP_WHEEL)
-    step:HookScript("OnMouseWheel", function(_, tick) Fan.Wheeled(tick) end)
-    Fan.step = step
-    range = ns.Label(step, "GameFontNormalSmall")
-    range:SetPoint("CENTER")
-    range:SetTextColor(1, 0.82, 0.3)
-
     tab = BuildSmall("WolkaraMobileFanTab", "SecureActionButtonTemplate")
     tab:RegisterForClicks("AnyUp", "AnyDown")
     tab:SetAttribute("useOnKeyDown", true)
@@ -725,8 +573,6 @@ function Fan.Activate(index)
         if switch then switch:SetAttribute("active", index) end
         for fanIndex, ring in ipairs(holders) do ring:SetShown(fanIndex == index) end
         Render(offset)
-    elseif range then
-        range:SetText((offset + 1) .. "-" .. math.min(count, offset + SHOWN) .. (most > 0 and " >" or ""))
     end
     if Fan.Refresh then Fan:Refresh() end
 end
@@ -780,7 +626,6 @@ function Fan:Layout()
     local size, small = fan.size, math.floor(fan.size * SMALL + 0.5)
     geometry.outer, geometry.size = outer, size
     motion.mode = nil
-    HideGhosts()
     local span = outer + size * 1.5
     local on = 0
     for fanIndex, ring in ipairs(holders) do
@@ -790,8 +635,6 @@ function Fan:Layout()
         local offset = ns.Clamp(fan.offsets[fanIndex] or 0, 0, fanMost)
         fan.offsets[fanIndex] = offset
         ring:SetSize(span, span)
-        ring:SetAttribute("size", span)
-        ring:SetAttribute("step", STEP)
         ring:SetAttribute("shown", SHOWN)
         ring:SetAttribute("count", fanCount)
         ring:SetAttribute("most", fanMost)
@@ -828,14 +671,6 @@ function Fan:Layout()
     jump.iconFrame:SetSize(iconSize, iconSize)
     jump.iconFrame:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", -radius * 0.42, radius * 0.42)
     jump.icon:SetAllPoints(jump.iconFrame)
-    local rx, ry = Polar(outer + size * 0.85, FIRST)
-    Fan.step:ClearAllPoints()
-    Fan.step:SetSize(math.floor(size * 1.2), math.floor(size * 0.55))
-    Fan.step:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", rx, ry + size * 0.15)
-    Fan.step:SetFrameLevel(root:GetFrameLevel() + 6)
-    -- Where the ring is within a fan is plain from the spells themselves, so the range
-    -- ("6-10 >") is not shown; dragging turns the ring, in combat too.
-    Fan.step:Hide()
     local sx, sy = Polar(height * SWITCH_RADIUS, SWITCH_ANGLE)
     local switchSize = math.floor(size * 0.62 + 0.5)
     switch:ClearAllPoints()
@@ -863,9 +698,7 @@ end
 function Fan:Refresh()
     if not root then return end
     EveryButton(ns.RefreshButton)
-    if motion.ghosts then
-        for index = 1, COUNT do SyncGhost(ghosts[index], buttons[index]) end
-    elseif not InCombatLockdown() then
+    if not InCombatLockdown() then
         Render(motion.pos)
     else
         for _, button in ipairs(buttons) do button:SetAlpha(BaseAlpha(button)) end
@@ -938,7 +771,6 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     elseif command == "off" then fan.enabled = false
     elseif command == "size" and number then fan.size = ns.Clamp(number, 40, 80)
     elseif command == "reach" and number then fan.radius = ns.Clamp(number, 22, 50)
-    elseif command == "debug" then ns.fanDebug = not ns.fanDebug; ns.Print("fan debug " .. (ns.fanDebug and "on" or "off") .. "."); return
     else
         ns.Print("/mobile fan on, off, size 40-80, reach 22-50. Now: " .. (fan.enabled and "on" or "off")
             .. ", size " .. fan.size .. ", reach " .. fan.radius .. ".")
