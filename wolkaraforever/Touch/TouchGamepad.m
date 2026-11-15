@@ -36,7 +36,9 @@ CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity) {
     CGFloat deadZone = (1 - s) * 0.15;
     if (magnitude <= deadZone) return CGPointZero;
     CGFloat t = (magnitude - deadZone) / (1 - deadZone);
-    CGFloat shaped = pow(t, 1 + (1 - s) * 2);
+    // Lower sensitivity both softens small pushes and lowers the top speed: at the lowest
+    // setting a stick pushed all the way gives a little over half.
+    CGFloat shaped = pow(t, 1 + (1 - s) * 2) * (0.35 + 0.65 * s);
     return CGPointMake(position.x / length * shaped, position.y / length * shaped);
 }
 
