@@ -172,6 +172,7 @@ end
 -- exact position and plain frames' data are not available to it on every client.
 local DOWN = [=[
     owner:SetAttribute("dragmoved", nil)
+    owner:SetAttribute("swiped", nil)
     owner:SetAttribute("downindex", self:GetAttribute("ringindex"))
     owner:SetAttribute("lastpath", "down")
 ]=]
@@ -206,7 +207,7 @@ local UP = [=[
         local button = owner:GetFrameRef("b" .. index)
         if button and button:IsUnderMouse() then upIndex = index; break end
     end
-    owner:SetAttribute("lastpath", "up:" .. tostring(downIndex) .. ">" .. tostring(upIndex))
+    owner:SetAttribute("lastpath", "up:" .. (downIndex or -1) .. ">" .. (upIndex or -1))
     if not downIndex or not upIndex or upIndex == downIndex then return end
     owner:SetAttribute("swiped", true)
     local wanted = offset - (upIndex - downIndex)
@@ -215,22 +216,14 @@ local UP = [=[
     owner:SetAttribute("offset", wanted)
 ]=] .. PLACE
 
--- A click casts only after a tap: not after the ring was dragged (the insecure side says so out
--- of combat, where it may still write to the secure frame), and not when the finger ended over
--- something other than the spell it pressed (combat, where the buttons stayed put).
+-- A click casts only after a tap. It reads only flags on the ring's own secure frame: out of
+-- combat the insecure side marks a drag there as it happens; in combat the secure release marks
+-- a spin it turned the ring for. No other check here, so a tap can never be swallowed.
 local CLICK = [=[
-    if owner:GetAttribute("dragmoved") then
+    if owner:GetAttribute("dragmoved") or owner:GetAttribute("swiped") then
         owner:SetAttribute("dragmoved", nil)
+        owner:SetAttribute("swiped", nil)
         return false
-    end
-    -- Ended over a different spell than the one pressed: that was a drag in combat. Over no
-    -- spell at all is let through, because a tap at the edge of a spell is inside its enlarged
-    -- touch area but outside the frame IsUnderMouse measures.
-    local pressed = owner:GetAttribute("downindex")
-    local offset = owner:GetAttribute("offset") or 0
-    for index = offset + 1, offset + owner:GetAttribute("shown") do
-        local button = owner:GetFrameRef("b" .. index)
-        if index ~= pressed and button and button:IsUnderMouse() then return false end
     end
 ]=]
 
