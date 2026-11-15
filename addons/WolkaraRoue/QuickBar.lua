@@ -349,10 +349,8 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 1, MAX_SLOTS)
     elseif command == "size" and number then quick.size = ns.Clamp(number, 36, 64)
     elseif command == "reset" then quick.offset = { x = 0, y = 0 }
-    elseif command == "x" and number then quick.offset.x = number
-    elseif command == "y" and number then quick.offset.y = number
     else
-        ns.Print("/mobile quick on, off, count 1-5, size 36-64, x <points right>, y <points down>, reset (position). Now: " .. (quick.enabled and "on" or "off")
+        ns.Print("/mobile quick on, off, count 1-5, size 36-64, reset (position). Now: " .. (quick.enabled and "on" or "off")
             .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
         return
     end

@@ -16,7 +16,7 @@
 # Upstream: no (it serves one add-on's layout).
 #
 diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
-index 32095d0..c8857b4 100644
+index 32095d0..d8cd487 100644
 --- a/translation/AppKit/AppKit.m
 +++ b/translation/AppKit/AppKit.m
 @@ -317,6 +317,14 @@ static BOOL AKMobileInterface(void) {
@@ -42,7 +42,7 @@ index 32095d0..c8857b4 100644
      if (_pressedLeft) [self postMouse:NSEventTypeLeftMouseUp at:_last button:0];
      if (_pressedRight) [self postMouse:NSEventTypeRightMouseUp at:_last button:1];
  }
-@@ -737,6 +746,87 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -737,6 +746,86 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          [self postScrollNotch:direction];
      }
  }
@@ -85,8 +85,7 @@ index 32095d0..c8857b4 100644
 +    }
 +}
 +- (void)stopWheelCoast { [_spinCoast invalidate]; _spinCoast = nil; }
-+- (void)beginWheelSpinAt:(CGPoint)point {
-+    (void)point;
++- (void)beginWheelSpin {
 +    [self cancelDirectHold];
 +    _directPending = NO; _directSpin = YES;
 +    _spinAngle = AKWheelAngle(self.bounds.size, _directStart);
@@ -130,7 +129,7 @@ index 32095d0..c8857b4 100644
  - (BOOL)directGestureActive { return _directTouch != nil || _directMulti; }
  - (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
      if ([self handleTrackpadTouches:t event:ev]) return;
-@@ -747,6 +837,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -747,6 +836,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          _directTouch = t.anyObject;
          _last = [_directTouch locationInView:self];
          _directStart = _last; _directPending = YES; _directHeld = NO;
@@ -140,7 +139,7 @@ index 32095d0..c8857b4 100644
          // The pointer moves under the finger first, so the game knows what is there before
          // any button is pressed.
          [self postMouse:NSEventTypeMouseMoved at:_last button:0];
-@@ -769,8 +862,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -769,8 +861,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
      if ([self directGestureActive]) {
          if (_directMulti || ![t containsObject:_directTouch]) return;
          CGPoint point = [_directTouch locationInView:self];
@@ -148,14 +147,14 @@ index 32095d0..c8857b4 100644
          if (_directPending || _directHeld) {
              if (hypot(point.x - _directStart.x, point.y - _directStart.y) < AKDirectSlop) return;
 +            if (_directPending && _spinCandidate) {
-+                [self beginWheelSpinAt:point];
++                [self beginWheelSpin];
 +                [self followWheelSpinTo:point];
 +                return;
 +            }
              [self cancelDirectHold];
              BOOL turn = _directHeld;
              _directPending = NO; _directHeld = NO;
-@@ -798,7 +897,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -798,7 +896,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          if (!_directMulti && [t containsObject:_directTouch]) {
              [self cancelDirectHold];
              CGPoint point = [_directTouch locationInView:self];
@@ -166,7 +165,7 @@ index 32095d0..c8857b4 100644
                  _directPending = NO;
                  [self postMouse:NSEventTypeLeftMouseDown at:_directStart button:0];
                  [self postMouse:NSEventTypeLeftMouseUp at:_directStart button:0];
-@@ -821,7 +922,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -821,7 +921,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
      if ([self directGestureActive]) {
          // A cancelled gesture clicks nothing; whatever it held is let go.
          [self cancelDirectHold];
