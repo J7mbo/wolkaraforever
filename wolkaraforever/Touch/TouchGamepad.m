@@ -102,6 +102,7 @@ CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity) {
 - (void)releaseInput { [self setPressed:NO]; }
 @end
 
+NSNotificationName const AKGamepadTapThroughNotification = @"AKGamepadTapThroughNotification";
 @interface AKGamepadStick : UIControl
 @property(nonatomic, copy) NSString *element;
 @property(nonatomic, readonly) CGPoint position;
@@ -120,6 +121,8 @@ CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity) {
 // of a double tap. Nothing about movement changes: this is measured after the finger is gone,
 // and a tap that travelled is not reported at all.
 @property(nonatomic, copy, nullable) void (^tapRecognized)(NSTimeInterval time);
+// Where that tap landed, in window coordinates: read inside tapRecognized.
+@property(nonatomic, readonly) CGPoint tapWindowPoint;
 - (void)pollAutoRun:(NSTimeInterval)now;
 - (void)reset;
 @end
@@ -236,6 +239,7 @@ static const CGFloat AKAutoRunArm = 60;
         [self fadeOut];
         return;
     }
+    _tapWindowPoint = touch ? [touch locationInView:nil] : CGPointZero;
     [self reset]; [self fadeOut];
     // Reported after the reset, so the tap is judged against a stick that is already let go of:
     // a gesture never depends on the position the tap left behind.
@@ -450,6 +454,20 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
 // from the camera.
 - (void)stickTapped:(AKGamepadStick *)stick at:(NSTimeInterval)time {
     NSTimeInterval *last = stick == _leftStick ? &_leftTap : &_rightTap;
+    // Floating sticks take every touch in their half, so a tap that stayed put is handed on to
+    // the game where it landed: a window's close button, a bag slot, the add-on's buttons. The
+    // stick had already answered the touch; the tap only clicks once the finger is gone, and
+    // only when it did not steer. Double-tap stick buttons need those taps, so with them on
+    // nothing is handed on.
+    if (self.floatingActive && !_preferences.stickButtonsEnabled) {
+        *last = 0;
+        CGPoint point = stick.tapWindowPoint;
+        [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadTapThroughNotification object:self
+            userInfo:@{@"x": @(point.x), @"y": @(point.y)}];
+        AKTouchControllerLog(AKTouchControllerEventGesture, @"tap-through",
+                             @{@"control": stick == _leftStick ? @"leftStick" : @"rightStick"});
+        return;
+    }
     BOOL wanted = _preferences.stickButtonsEnabled && !self.configuring && _controlsVisible;
     if (wanted && !self.stickButtonsAvailable) {
         *last = 0;
