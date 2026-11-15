@@ -239,6 +239,21 @@ local STEP_CLICK = [=[
     owner:SetAttribute("offset", offset)
 ]=] .. PLACE
 
+-- The scroll wheel: each tick turns the ring by one spell, scrolling down for the later ones.
+-- Like a click, a wheel tick is an event the game lets secure code answer in combat. The tick's
+-- size arrives as "offset" (or "delta", depending on the client); either is read.
+local WHEEL = [=[
+    local tick = delta or offset
+    if not tick or tick == 0 then return end
+    local pos = owner:GetAttribute("offset") or 0
+    local most = owner:GetAttribute("most")
+    if tick < 0 then pos = pos + 1 else pos = pos - 1 end
+    if pos < 0 then pos = 0 elseif pos > most then pos = most end
+    if pos == owner:GetAttribute("offset") then return end
+    owner:SetAttribute("offset", pos)
+    owner:SetAttribute("wheeled", (owner:GetAttribute("wheeled") or 0) + 1)
+]=] .. PLACE
+
 -- ---------------------------------------------------------------------------------------
 -- Motion. `pos` is the ring's rotation in slots: 0 shows spells 1-5, MOST shows 11-15, and a
 -- fraction is between two spells. Everything below is insecure and only draws.
@@ -359,6 +374,27 @@ end
 
 local function SpringTo(target)
     motion.target, motion.mode = target, "spring"
+end
+
+-- After a wheel tick: out of combat glide from where the ring was to where the secure side put
+-- it; in combat the secure side has already placed the buttons, so only the label follows.
+function Fan.Wheeled(tick)
+    local offset = holder:GetAttribute("offset") or 0
+    if ns.fanDebug then
+        ns.Print(("fan wheel: tick=%s offset=%s turns=%s combat=%s"):format(tostring(tick),
+            tostring(offset), tostring(holder:GetAttribute("wheeled")), tostring(InCombatLockdown())))
+    end
+    if offset == motion.settledAt and offset == motion.target then return end
+    if InCombatLockdown() then
+        motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
+        if range then range:SetText((offset + 1) .. "-" .. (offset + SHOWN) .. " >") end
+        local db = ns.db and ns.db.fan
+        if type(db) == "table" and type(db.offsets) == "table" then db.offsets[1] = offset end
+        ns.FanFeedback()
+    else
+        motion.vel = 0
+        SpringTo(offset)
+    end
 end
 
 local function Sample(raw)
@@ -499,6 +535,9 @@ function Fan:Init()
         SecureHandlerWrapScript(button, "OnMouseDown", holder, DOWN)
         SecureHandlerWrapScript(button, "OnMouseUp", holder, UP)
         SecureHandlerWrapScript(button, "OnClick", holder, CLICK)
+        button:EnableMouseWheel(true)
+        SecureHandlerWrapScript(button, "OnMouseWheel", holder, WHEEL)
+        button:HookScript("OnMouseWheel", function(_, tick) Fan.Wheeled(tick) end)
         button:HookScript("OnMouseDown", function()
             PressStarted()
             if ns.fanDebug then
@@ -559,6 +598,9 @@ function Fan:Init()
         end
         ns.FanFeedback()
     end)
+    step:EnableMouseWheel(true)
+    SecureHandlerWrapScript(step, "OnMouseWheel", holder, WHEEL)
+    step:HookScript("OnMouseWheel", function(_, tick) Fan.Wheeled(tick) end)
     Fan.step = step
     range = ns.Label(step, "GameFontNormalSmall")
     range:SetPoint("CENTER")
