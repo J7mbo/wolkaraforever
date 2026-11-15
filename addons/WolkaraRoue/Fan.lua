@@ -188,6 +188,7 @@ local ANGLE = [=[
 
 local DOWN = [=[
     owner:SetAttribute("swiped", nil)
+    owner:SetAttribute("travel", 0)
     owner:SetAttribute("downoffset", owner:GetAttribute("offset"))
 ]=] .. ANGLE .. [=[
     owner:SetAttribute("downangle", angle)
@@ -216,7 +217,6 @@ local PLACE = [=[
 local UP = [=[
 ]=] .. ANGLE .. [=[
     local from = owner:GetAttribute("downangle")
-    owner:SetAttribute("downangle", nil)
     if not angle or not from then return end
     local turns = (from - angle) / owner:GetAttribute("step")
     if turns < ]=] .. SWIPE .. [=[ and turns > -]=] .. SWIPE .. [=[ then return end
@@ -232,11 +232,19 @@ local UP = [=[
     owner:SetAttribute("offset", best)
 ]=] .. PLACE
 
+-- The click decides for itself whether the finger travelled, from the press it shares with
+-- the release. The game does not promise which of OnMouseUp and OnClick runs first, so a flag
+-- left by the release cannot be trusted here: when the click came first, every spin cast the
+-- spell it ended on (and the flag then swallowed the next real tap).
 local CLICK = [=[
-    if owner:GetAttribute("swiped") then
-        owner:SetAttribute("swiped", nil)
-        return false
-    end
+    local from = owner:GetAttribute("downangle")
+    owner:SetAttribute("swiped", nil)
+    if not from then return end
+]=] .. ANGLE .. [=[
+    -- A release away from the ring entirely is a drag that left it, never a tap.
+    if not angle then return false end
+    local turns = (from - angle) / owner:GetAttribute("step")
+    if turns >= ]=] .. SWIPE .. [=[ or turns <= -]=] .. SWIPE .. [=[ then return false end
 ]=]
 
 -- ---------------------------------------------------------------------------------------
@@ -602,8 +610,9 @@ function Fan:Layout()
     local offset = fan.offsets[1]
     motion.mode = nil
     HideGhosts()
-    holder:SetSize(outer + size, outer + size)
-    holder:SetAttribute("size", outer + size)
+    local span = outer + size * 1.5
+    holder:SetSize(span, span)
+    holder:SetAttribute("size", span)
     holder:SetAttribute("step", STEP)
     holder:SetAttribute("shown", SHOWN)
     holder:SetAttribute("count", COUNT)
