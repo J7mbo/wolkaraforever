@@ -1239,6 +1239,8 @@ static const unsigned short AKKeyF12 = 111;
         if (self->_keyboardInput.isFirstResponder) [self->_keyboardInput reloadInputViews];
         if (self.isFirstResponder) [self reloadInputViews];
         self->_passwordKey.hidden = !self->_protectedField;
+        // The game asks for secure input only while its password field has the keyboard; the
+        // key follows that, so chat and every other field never show it.
         AKLog(@"keyboard: protected field %@", self->_protectedField ? @"focused" : @"left");
         if (self->_protectedField) [self typePendingPasswordSoon];
     });
@@ -1282,6 +1284,10 @@ static const unsigned short AKKeyF12 = 111;
         [self.delegate touchInsertText:password];
         [self.delegate touchSpecialKey:36 characters:@"\r"];
         AKLog(@"keyboard: the saved password was typed into the game's password field");
+        // Its job is done: the login is under way, so the keyboard goes, and the key stays
+        // away until the game asks for a password again.
+        self->_passwordKey.hidden = YES;
+        [self dismissKeyboard];
     });
 }
 - (UIViewController *)frontViewController {
