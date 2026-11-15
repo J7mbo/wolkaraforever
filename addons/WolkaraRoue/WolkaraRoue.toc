@@ -14,7 +14,9 @@ Picker.lua
 Wheels.lua
 Free.lua
 Turn.lua
+FanClassic.lua
 Fan.lua
+FanSelect.lua
 QuickBar.lua
 EditMode.lua
 Controls.lua
