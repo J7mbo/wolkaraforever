@@ -629,7 +629,7 @@ function ns.FanArrow() end
 function ns.FanTurn() end
 
 function ns.FanFeedback()
-    if PlaySound then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_ABILITY_PAGE_TURN) or 836, "Master") end
+    if PlaySound and Settings().sound ~= false then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_ABILITY_PAGE_TURN) or 836, "Master") end
     if flash and flash.anim then flash.anim:Stop(); flash.anim:Play() end
 end
 
