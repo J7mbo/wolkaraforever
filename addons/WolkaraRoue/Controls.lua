@@ -115,6 +115,17 @@ local function General(page)
     end)
     y = Row(page, y, ns.T("Tips"))
     Button(page, X2, y + ROW_H, ns.T("Show tips"), 150, function() panel:Hide(); if ns.ShowTips then ns.ShowTips() end end)
+    -- The game's own frame cap (maxFPS), saved by the game in Config.wtf like any setting.
+    -- A lower cap keeps the phone cooler and the battery fuller.
+    y = Row(page, y, ns.T("Max FPS"))
+    local function getCVar(name) return (C_CVar and C_CVar.GetCVar or GetCVar)(name) end
+    local function setCVar(name, value) pcall(C_CVar and C_CVar.SetCVar or SetCVar, name, tostring(value)) end
+    Stepper(page, X2, y + ROW_H, function()
+        return ns.Clamp(tonumber(getCVar("maxFPS")) or 60, 10, 120)
+    end, function(v)
+        setCVar("useMaxFPS", 1)
+        setCVar("maxFPS", v)
+    end, 5, 10, 120)
 end
 
 local function Combat(page)
