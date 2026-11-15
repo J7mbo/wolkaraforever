@@ -1200,7 +1200,6 @@ static const NSTimeInterval AKSystemKeyboardWait = 0.8, AKSystemKeyboardLateWait
 // and a password picked there arrives through insertText: and is typed into the game like
 // any other text. Nothing is stored or read back by this app; at any other time the input
 // stays untyped, so chat never sees a password suggestion.
-- (UITextContentType)textContentType { return _protectedField ? UITextContentTypePassword : nil; }
 - (void)insertText:(NSString *)text { [self.delegate touchInsertText:text]; }
 // Dictation types into whatever the controls announced as the game's text input, and it
 // asks for these two selectors when it does. They are the adapter's own converter - the
@@ -1233,11 +1232,6 @@ static const unsigned short AKKeyF12 = 111;
     _protectedField = protectedField;
     if (!changed) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        // The text view the keyboard is attached to is the one iOS asks about AutoFill, and it
-        // reads the content type when it attaches - so an open keyboard is asked again.
-        self->_keyboardInput.textContentType = self->_protectedField ? UITextContentTypePassword : nil;
-        if (self->_keyboardInput.isFirstResponder) [self->_keyboardInput reloadInputViews];
-        if (self.isFirstResponder) [self reloadInputViews];
         self->_passwordKey.hidden = !self->_protectedField;
         // The game asks for secure input only while its password field has the keyboard; the
         // key follows that, so chat and every other field never show it.
