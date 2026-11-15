@@ -583,8 +583,6 @@ function ns.FanFirstSlot()
 end
 
 function ns.FanLockIcon() end
-function ns.FanArrow() end
-function ns.FanTurn() end
 
 -- The ring settled on a new spell: the page-turn sound, unless it is switched off. The gold
 -- flash is kept for running into an end (FanBump).
