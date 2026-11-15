@@ -19,12 +19,12 @@ local function Large()
     local db = ns.db
     if type(db.windows) ~= "table" then db.windows = {} end
     if db.windows.size == nil then db.windows.size = "large" end
-    if type(db.windows.zoom) ~= "number" then db.windows.zoom = 100 end
+    if type(db.windows.edge) ~= "number" then db.windows.edge = 7 end
     return db.windows.size == "large"
 end
--- How much larger than the game draws them the windows may grow, when there is room: the
--- game sizes them for a desktop screen, which on a phone leaves them small.
-local function Zoom() Large(); return ns.Clamp(ns.db.windows.zoom, 100, 200) / 100 end
+-- How much of the screen's width the windows keep clear on the left and right, in percent:
+-- room for the Dynamic Island or a notch, on whichever side it is.
+local function Edge(W) Large(); return W * ns.Clamp(ns.db.windows.edge, 0, 15) / 100 end
 Placement.Settings = function() Large(); return ns.db.windows end
 
 local function Areas(W, H)
@@ -40,7 +40,9 @@ end
 
 function Placement.Best(W, H, width, height, largest)
     local best, chosen = -1, nil
+    local edge = Edge(W)
     for _, area in ipairs(Areas(W, H)) do
+        area.left, area.right = math.max(area.left, edge), math.max(area.right, edge)
         local scale = math.min(largest, (W - area.left - area.right) / width, (H - area.top - area.bottom) / height)
         if scale > best then best, chosen = scale, area end
     end
@@ -75,10 +77,11 @@ local function Fit(frame)
     local W, H = UIParent:GetWidth(), UIParent:GetHeight()
     local scale, area
     if WHOLE_SCREEN[frame:GetName() or ""] then
-        scale = math.min(natural[frame] * parentScale * Zoom(), (W - 2 * EDGE) / (width + right), (H - 2 * EDGE) / (height + top))
-        area = { left = EDGE, right = EDGE, top = EDGE, bottom = EDGE }
+        local side = math.max(EDGE, Edge(W))
+        scale = math.min(natural[frame] * parentScale, (W - 2 * side) / (width + right), (H - 2 * EDGE) / (height + top))
+        area = { left = side, right = side, top = EDGE, bottom = EDGE }
     else
-        scale, area = Placement.Best(W, H, width + right, height + top, natural[frame] * parentScale * Zoom())
+        scale, area = Placement.Best(W, H, width + right, height + top, natural[frame] * parentScale)
     end
     busy = true
     if math.abs(frame:GetScale() - scale / parentScale) > 0.001 then frame:SetScale(scale / parentScale) end
