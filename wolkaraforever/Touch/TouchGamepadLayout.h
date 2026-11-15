@@ -58,6 +58,13 @@ typedef NS_ENUM(NSInteger, AKGamepadLayoutMode) {
 @property(nonatomic) CGFloat moveSensitivity;
 @property(nonatomic) CGFloat cameraSensitivity;
 @property(nonatomic) BOOL hapticsEnabled;
+/// A ring around the screen's bottom-right corner left to the game, for an installed interface
+/// that puts a spell wheel there (the "Duo with room for an add-on" starting point turns it on).
+/// Floating sticks do not take a touch in it, and a drag that starts in it turns the wheel
+/// (wheel notches). Off by default. `wheelAreaSize` is the ring's outer edge as a share of the
+/// screen's height, 0.35...0.75 (0.52 by default); its inner edge is just beyond the jump.
+@property(nonatomic) BOOL wheelArea;
+@property(nonatomic) CGFloat wheelAreaSize;
 // Swap the visual shoulder slots only; controller element identities are unchanged.
 @property(nonatomic) BOOL swapShoulders;
 // Whether the optional performance HUD is shown. Off by default; the in-game

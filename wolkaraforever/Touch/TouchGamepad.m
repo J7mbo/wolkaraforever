@@ -356,6 +356,10 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
     UILabel *_hint;
     UISwitch *_editSwitch, *_hapticsSwitch, *_overlaySwitch, *_swapShouldersSwitch, *_sticksOnlySwitch;
     UISwitch *_floatingSwitch, *_simpleSwitch, *_stickButtonsSwitch;
+    // The spell wheel area: its switch, its size slider and that slider's label.
+    UISwitch *_wheelAreaSwitch;
+    UISlider *_wheelAreaSlider;
+    UILabel *_wheelAreaValue;
     UIButton *_addZoneButton, *_clearZoneButton;
     // The ability zones on screen, in the order the layout lists them.
     NSMutableArray<AKGamepadButton *> *_zoneButtons;
@@ -845,11 +849,8 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
 // everywhere else - including any area the player reserved - is not ours, so the touch goes on
 // to whatever is underneath. Nothing here forwards a touch by hand: returning nil is the app's
 // own hit-testing doing it.
-static const CGFloat AKFloatWheelInner = 0.17, AKFloatWheelOuter = 0.52;
-static BOOL AKFloatWheelReserved(void) {
-    id value = [NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraForeverWheelDragV1"];
-    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
-}
+// The spell wheel area's inner edge, as a share of the height: just beyond the jump.
+static const CGFloat AKFloatWheelInner = 0.17;
 // Whether one of this app's own buttons - the toolbar's keyboard, the arrow that shows it, and
 // any other control beside the gamepad in the game's view - is under the point. Those are
 // answered before a stick: a thumb's half of the screen never swallows the app's own button.
@@ -885,10 +886,10 @@ static BOOL AKFloatWheelReserved(void) {
         AKGamepadButton *jump = _jumpButton;
         return jump.enabled ? jump : nil;
     }
-    // The spell wheel's ring around the corner (WolkaraRoue) belongs to the game, so a tap
-    // there casts and a drag turns the wheel instead of growing the camera stick. The same
-    // band and the same switch as the wheel drag in the touch layer (WolkaraForeverWheelDragV1).
-    if (corner >= AKFloatWheelInner * h && corner <= AKFloatWheelOuter * h && AKFloatWheelReserved()) return nil;
+    // The spell wheel area, when the layout has one, belongs to the game: a tap there casts and
+    // a drag turns the wheel instead of growing the camera stick. It is the player's own layout
+    // data, like a reserved area; the touch layer turns a drag in it into wheel notches.
+    if (_preferences.wheelArea && corner >= AKFloatWheelInner * h && corner <= _preferences.wheelAreaSize * h) return nil;
     if (fx <= AKFloatLeftMaxX && (fy >= AKFloatLeftLowY || (fx >= AKFloatLeftMinX && fy >= AKFloatLeftMinY)))
         return [self stickHeld:_leftStick event:event] ? _sink : _leftStick;
     if (fx >= AKFloatRightMinX && fy >= AKFloatRightMinY && fy <= AKFloatRightMaxY)
@@ -1145,6 +1146,23 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
         UIStackView *floatingRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.floatingSticks")],_floatingSwitch]];
         floatingRow.axis = UILayoutConstraintAxisHorizontal; floatingRow.alignment = UIStackViewAlignmentCenter;
         [options addArrangedSubview:floatingRow];
+        // The spell wheel area: a ring around the bottom-right corner left to an installed
+        // interface's spell wheel, and how far out it reaches (to match that wheel's own size).
+        _wheelAreaSwitch = [UISwitch new]; _wheelAreaSwitch.on = _preferences.wheelArea;
+        _wheelAreaSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.wheelArea");
+        _wheelAreaSwitch.accessibilityIdentifier = @"wolkaraforever.controls.wheelArea";
+        [_wheelAreaSwitch addTarget:self action:@selector(wheelAreaChanged:) forControlEvents:UIControlEventValueChanged];
+        UIStackView *wheelRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.wheelArea")],_wheelAreaSwitch]];
+        wheelRow.axis = UILayoutConstraintAxisHorizontal; wheelRow.alignment = UIStackViewAlignmentCenter;
+        [options addArrangedSubview:wheelRow];
+        _wheelAreaValue = [self label:@""];
+        _wheelAreaSlider = [UISlider new]; _wheelAreaSlider.minimumValue = 0.35; _wheelAreaSlider.maximumValue = 0.75;
+        _wheelAreaSlider.value = _preferences.wheelAreaSize;
+        _wheelAreaSlider.accessibilityLabel = AKHostLocalized(@"touch.settings.wheelAreaSize");
+        _wheelAreaSlider.accessibilityIdentifier = @"wolkaraforever.controls.wheelAreaSize";
+        [_wheelAreaSlider addTarget:self action:@selector(wheelAreaSizeChanged:) forControlEvents:UIControlEventValueChanged];
+        [options addArrangedSubview:_wheelAreaValue]; [options addArrangedSubview:_wheelAreaSlider];
+        [self updateWheelArea];
     }
     // Triggers on the outside is a choice about two controls Simple does not draw, so in Simple
     // the row stays where it is and its switch is not usable. A row that vanished and came back
@@ -1266,6 +1284,19 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     [self reset]; _preferences.floatingSticks = sender.on; [_preferences save];
     [self updateAppearance];
 }
+- (void)updateWheelArea {
+    _wheelAreaSlider.enabled = _preferences.wheelArea;
+    _wheelAreaValue.text = AKHostLocalizedFormat(@"touch.settings.wheelAreaSize.value", _preferences.wheelAreaSize*100);
+    _wheelAreaSlider.accessibilityValue = _wheelAreaValue.text;
+}
+- (void)wheelAreaChanged:(UISwitch *)sender {
+    [self reset]; _preferences.wheelArea = sender.on; [_preferences save];
+    [self updateWheelArea]; [self updateAppearance];
+}
+- (void)wheelAreaSizeChanged:(UISlider *)slider {
+    _preferences.wheelAreaSize = slider.value; [_preferences save];
+    [self updateWheelArea];
+}
 - (void)hapticsChanged:(UISwitch *)sender {
     _preferences.hapticsEnabled = sender.on; [_preferences save];
     if (self.configurationChanged) self.configurationChanged();
@@ -1278,6 +1309,7 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     if (!sender.on) return;
     [self reset]; _editing = YES; [_settings removeFromSuperview]; _settings = nil;
     _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _overlaySwitch = nil; _swapShouldersSwitch = nil; _sticksOnlySwitch = nil; _floatingSwitch = nil; _settingsColumns = nil;
+    _wheelAreaSwitch = nil; _wheelAreaSlider = nil; _wheelAreaValue = nil;
     _simpleSwitch = nil; _stickButtonsSwitch = nil; _addZoneButton = nil; _clearZoneButton = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
     // The zones' own menus (which button each sends) belong to the editor.
@@ -1290,6 +1322,7 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _overlaySwitch.on = _preferences.performanceOverlayEnabled;
     _sticksOnlySwitch.on = _preferences.sticksOnly; _floatingSwitch.on = _preferences.floatingSticks;
+    _wheelAreaSwitch.on = _preferences.wheelArea; _wheelAreaSlider.value = _preferences.wheelAreaSize; [self updateWheelArea];
     _simpleSwitch.on = _preferences.mode == AKGamepadLayoutModeSimple;
     _stickButtonsSwitch.on = _preferences.stickButtonsEnabled;
     [self syncAbilityZones]; [self updateSettingsZoneCount];
@@ -1298,6 +1331,7 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
 - (void)finishConfiguration {
     [self reset]; [_preferences save]; _editing = NO; [_dragOrigins removeAllObjects];
     [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _overlaySwitch = nil; _swapShouldersSwitch = nil; _sticksOnlySwitch = nil; _floatingSwitch = nil; _settingsColumns = nil;
+    _wheelAreaSwitch = nil; _wheelAreaSlider = nil; _wheelAreaValue = nil;
     _simpleSwitch = nil; _stickButtonsSwitch = nil; _addZoneButton = nil; _clearZoneButton = nil;
     [self syncAbilityZones];
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
