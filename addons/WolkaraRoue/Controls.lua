@@ -128,7 +128,7 @@ local function Combat(page)
     Stepper(page, X2, y + ROW_H, function() return fan().radius end, function(v) fan().radius = v end, 2, 22, 50, "%")
     y = Row(page, y, ns.T("Quick bar"))
     Switch(page, X2, y + ROW_H, function() return quick().enabled end, function(v) quick().enabled = v end)
-    Stepper(page, X2 + 100, y + ROW_H, function() return quick().count end, function(v) quick().count = v end, 1, 3, 5)
+    Stepper(page, X2 + 100, y + ROW_H, function() return quick().count end, function(v) quick().count = v end, 1, 1, 5)
     y = Row(page, y, ns.T("Buffs"))
     Switch(page, X2, y + ROW_H, function() return ns.Status and ns.Status.Settings().buffs end,
         function(v) if ns.Status then ns.Status.Settings().buffs = v end end, ns.T("On bar"), ns.T("Game's"), 120)

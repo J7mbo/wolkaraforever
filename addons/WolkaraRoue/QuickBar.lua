@@ -30,7 +30,7 @@ local function Settings()
         if type(quick.pages[page]) ~= "table" then quick.pages[page] = {} end
     end
     quick.entries = nil
-    quick.count = ns.Clamp(math.floor(tonumber(quick.count) or 4), 3, MAX_SLOTS)
+    quick.count = ns.Clamp(math.floor(tonumber(quick.count) or 4), 1, MAX_SLOTS)
     quick.size = ns.Clamp(tonumber(quick.size) or 46, 36, 64)
     quick.page = ns.Clamp(math.floor(tonumber(quick.page) or 1), 1, PAGES)
     -- Where the whole bar has been dragged to in Customize mode, in points from its default
@@ -316,13 +316,13 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     local number = tonumber(value)
     if command == "on" then quick.enabled = true
     elseif command == "off" then quick.enabled = false
-    elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 3, MAX_SLOTS)
+    elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 1, MAX_SLOTS)
     elseif command == "size" and number then quick.size = ns.Clamp(number, 36, 64)
     elseif command == "reset" then quick.offset = { x = 0, y = 0 }
     elseif command == "x" and number then quick.offset.x = number
     elseif command == "y" and number then quick.offset.y = number
     else
-        ns.Print("/mobile quick on, off, count 3-5, size 36-64, x <points right>, y <points down>, reset (position). Now: " .. (quick.enabled and "on" or "off")
+        ns.Print("/mobile quick on, off, count 1-5, size 36-64, x <points right>, y <points down>, reset (position). Now: " .. (quick.enabled and "on" or "off")
             .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
         return
     end
