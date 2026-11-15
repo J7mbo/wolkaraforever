@@ -11,6 +11,9 @@ CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity);
 // A tap on a floating stick that the game should have: userInfo x/y, window coordinates.
 // The view the game draws in clicks there.
 FOUNDATION_EXPORT NSNotificationName const AKGamepadTapThroughNotification;
+// A floating stick held still, then dragged: the drag belongs to the game. userInfo phase
+// (began, moved, ended) and x/y in window coordinates.
+FOUNDATION_EXPORT NSNotificationName const AKGamepadDragThroughNotification;
 // Owns only our virtual device. Physical controllers and their handlers stay
 // with GameController/the guest. No game events or memory are inspected.
 @interface AKTouchGamepad : NSObject
