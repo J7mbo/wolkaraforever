@@ -5,9 +5,10 @@
 # that lights up as it comes, the
 # cooldown text, the touch and long press on a spell, the bag placement, the game's windows, the
 # minimap, the chat, the moves of old saves and the settings panel, the game API values a client
-# may not have, and the Duo fan and quick bar behave as
+# may not have, the Duo fans and quick bar, and the Duo window margins behave as
 # tests/test_mobile_addon_turn.lua, test_mobile_addon_cooldown.lua, test_mobile_addon_press.lua,
-# test_mobile_addon_bags.lua, test_mobile_addon_windows.lua, test_mobile_addon_minimap.lua,
+# test_mobile_addon_bags.lua, test_mobile_addon_windows.lua, test_mobile_addon_placement.lua,
+# test_mobile_addon_minimap.lua,
 # test_mobile_addon_chat.lua, test_mobile_addon_settings.lua, test_mobile_addon_api.lua and
 # test_mobile_addon_duo.lua expect.
 #
@@ -44,6 +45,7 @@ luajit wolkaraforever/tools/tests/test_mobile_addon_cooldown.lua "$addon/Actions
 luajit wolkaraforever/tools/tests/test_mobile_addon_press.lua "$addon/Actions.lua"
 luajit wolkaraforever/tools/tests/test_mobile_addon_bags.lua "$addon/Bags.lua"
 luajit wolkaraforever/tools/tests/test_mobile_addon_windows.lua "$addon/Windows.lua"
+luajit wolkaraforever/tools/tests/test_mobile_addon_placement.lua "$addon/Placement.lua"
 luajit wolkaraforever/tools/tests/test_mobile_addon_minimap.lua "$addon/Minimap.lua"
 luajit wolkaraforever/tools/tests/test_mobile_addon_chat.lua "$addon/Chat.lua"
 luajit wolkaraforever/tools/tests/test_mobile_addon_settings.lua "$addon/Core.lua"
