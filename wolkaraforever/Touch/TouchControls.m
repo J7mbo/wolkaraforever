@@ -673,6 +673,10 @@ static void AKSavedPasswordRead(void (^done)(NSString *password, OSStatus status
     // event input (Carbon adapter, patch 0058).
     BOOL _protectedField;
     UIButton *_passwordKey;
+    // The saved password waiting to be typed: Face ID (or the save prompt) takes the app away
+    // for a moment, and the game only has its password field back once it is active again.
+    NSString *_pendingPassword;
+    NSUInteger _pendingPasswordGeneration;
 }
 
 // The launcher's switch, and the platform's install path, ask this before the
@@ -1235,16 +1239,50 @@ static const unsigned short AKKeyF12 = 111;
         if (self->_keyboardInput.isFirstResponder) [self->_keyboardInput reloadInputViews];
         if (self.isFirstResponder) [self reloadInputViews];
         self->_passwordKey.hidden = !self->_protectedField;
+        AKLog(@"keyboard: protected field %@", self->_protectedField ? @"focused" : @"left");
+        if (self->_protectedField) [self typePendingPasswordSoon];
     });
 }
 
 // The key on the keyboard's row while the game's password field has the keyboard: type the
 // saved password and Return, after Face ID. With nothing saved yet it offers to save one.
+// Typed only into the game's password field, and only once the app is in front again: the
+// password waits up to a few seconds for both, then is dropped.
 - (void)typeSavedPassword:(NSString *)password {
-    if (!password.length || !_protectedField) return;
-    [self.delegate touchInsertText:password];
-    [self.delegate touchSpecialKey:36 characters:@"\r"];
-    AKLog(@"keyboard: the saved password was typed into a protected field");
+    if (!password.length) return;
+    _pendingPassword = [password copy];
+    NSUInteger generation = ++_pendingPasswordGeneration;
+    AKLog(@"keyboard: saved password ready, waiting for the game's password field");
+    [NSNotificationCenter.defaultCenter removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(passwordAppActive:)
+                                               name:UIApplicationDidBecomeActiveNotification object:nil];
+    [self typePendingPasswordSoon];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self->_pendingPasswordGeneration != generation || !self->_pendingPassword) return;
+        self->_pendingPassword = nil;
+        [NSNotificationCenter.defaultCenter removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+        AKLog(@"keyboard: saved password dropped, the password field never came back");
+    });
+}
+- (void)passwordAppActive:(NSNotification *)note { (void)note; [self typePendingPasswordSoon]; }
+// A short pause lets the game see it is active and give its field the keyboard again.
+- (void)typePendingPasswordSoon {
+    if (!_pendingPassword) return;
+    NSUInteger generation = _pendingPasswordGeneration;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self->_pendingPasswordGeneration != generation || !self->_pendingPassword) return;
+        if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive || !self->_protectedField) {
+            AKLog(@"keyboard: saved password still waiting (active=%d field=%d)",
+                  UIApplication.sharedApplication.applicationState == UIApplicationStateActive, self->_protectedField);
+            return;
+        }
+        NSString *password = self->_pendingPassword;
+        self->_pendingPassword = nil;
+        [NSNotificationCenter.defaultCenter removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+        [self.delegate touchInsertText:password];
+        [self.delegate touchSpecialKey:36 characters:@"\r"];
+        AKLog(@"keyboard: the saved password was typed into the game's password field");
+    });
 }
 - (UIViewController *)frontViewController {
     UIViewController *root = self.window.rootViewController;
@@ -1254,6 +1292,7 @@ static const unsigned short AKKeyF12 = 111;
 - (void)savedPasswordKey {
     if (!_protectedField) return;
     AKSavedPasswordRead(^(NSString *password, OSStatus status) {
+        AKLog(@"keyboard: saved password read status=%d", (int)status);
         if (password.length) { [self typeSavedPassword:password]; return; }
         if (status == errSecItemNotFound) [self offerToSavePassword];
     });
@@ -1275,7 +1314,10 @@ static const unsigned short AKKeyF12 = 111;
                                             style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         (void)action;
         NSString *password = weakAsk.textFields.firstObject.text;
-        if (!password.length || AKSavedPasswordStore(password) != errSecSuccess) return;
+        if (!password.length) return;
+        OSStatus stored = AKSavedPasswordStore(password);
+        AKLog(@"keyboard: saved password store status=%d", (int)stored);
+        if (stored != errSecSuccess) return;
         [self typeSavedPassword:password];
     }]];
     [front presentViewController:ask animated:YES completion:nil];
