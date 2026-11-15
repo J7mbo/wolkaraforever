@@ -10,7 +10,8 @@ local EDGE = 6
 local TAB_W, TAB_H = 24, 52
 local GAP = 8
 
-local container, handle, pager, grip
+local container, handle, pager, grip, outline
+local BeginBlockDrag, EndBlockDrag
 local holders, slots = {}, {}
 
 local DEFAULTS = { enabled = true, count = 5, size = 46, open = true, seeded = false, page = 1 }
@@ -156,28 +157,50 @@ function Quick:Init()
         if not x or not scale or scale == 0 then return nil end
         return x / scale, y / scale
     end
-    grip:SetScript("OnMouseDown", function(self)
+    -- One drag moves the whole block, whichever part of it the finger started on.
+    local dragging
+    BeginBlockDrag = function()
         if InCombatLockdown() or not (ns.editing or ns.editMode) then return end
         local x, y = CursorPoints()
         if not x then return end
         local offset = Settings().offset
-        self.from = { x = x, y = y, ox = offset.x, oy = offset.y }
-    end)
-    grip:SetScript("OnMouseUp", function(self)
-        if not self.from then return end
-        self.from = nil
+        dragging = { x = x, y = y, ox = offset.x, oy = offset.y }
+    end
+    EndBlockDrag = function()
+        if not dragging then return end
+        dragging = nil
         if ns.MarkChanged then ns.MarkChanged() end
-    end)
-    grip:SetScript("OnUpdate", function(self)
-        local from = self.from
-        if not from or InCombatLockdown() then self.from = nil; return end
+    end
+    grip:SetScript("OnMouseDown", BeginBlockDrag)
+    grip:SetScript("OnMouseUp", EndBlockDrag)
+    local mover = CreateFrame("Frame")
+    mover:SetScript("OnUpdate", function()
+        if not dragging then return end
+        if InCombatLockdown() then dragging = nil; return end
+        -- A release the button never heard about (the finger lifted off it) still ends the drag.
+        if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then EndBlockDrag(); return end
         local x, y = CursorPoints()
         if not x then return end
         local offset = Settings().offset
-        offset.x = from.ox + (x - from.x)
-        offset.y = from.oy - (y - from.y)
+        offset.x = dragging.ox + (x - dragging.x)
+        offset.y = dragging.oy - (y - dragging.y)
         Quick:Layout()
     end)
+    -- In Customize mode the circles themselves are the handle, as every other element is:
+    -- drag one and the bar follows; a tap still chooses its spell.
+    for page = 1, PAGES do
+        for _, button in ipairs(slots[page]) do
+            button:RegisterForDrag("LeftButton")
+            button:HookScript("OnDragStart", function() if ns.editing then BeginBlockDrag() end end)
+            button:HookScript("OnDragStop", EndBlockDrag)
+        end
+    end
+    outline = CreateFrame("Frame", nil, UIParent)
+    outline:SetFrameStrata("DIALOG")
+    outline:EnableMouse(false)
+    outline.glow = ns.EditFrame(outline)
+    outline.glow:Show()
+    outline:Hide()
 end
 
 local function HideLeft()
@@ -190,7 +213,7 @@ end
 function Quick:Layout()
     if not container or InCombatLockdown() then return end
     local quick = Settings()
-    if not quick.enabled or not ns.DuoLayout() then container:Hide(); handle:Hide(); grip:Hide(); return end
+    if not quick.enabled or not ns.DuoLayout() then container:Hide(); handle:Hide(); grip:Hide(); outline:Hide(); return end
 
     local size = quick.size
     local pagerHeight = math.floor(size * 0.55)
@@ -224,7 +247,12 @@ function Quick:Layout()
     -- sits, so the part of the grip a finger can reach has to be beyond it.
     grip:SetSize(math.max(blockW + 170, 220), 28)
     grip:SetPoint("BOTTOMLEFT", UIParent, "TOPLEFT", left, -(top - 4))
-    grip:SetShown((ns.editing or ns.editMode) and true or false)
+    -- The grip is for Customize: in Edit mode the spell picker opens over the left side.
+    grip:SetShown(ns.editing and true or false)
+    outline:ClearAllPoints()
+    outline:SetPoint("TOPLEFT", UIParent, "TOPLEFT", left - 2, -(top - 2))
+    outline:SetSize(blockW + 4, height + 4)
+    outline:SetShown(ns.editing and true or false)
 
     for page = 1, PAGES do
         for index, button in ipairs(slots[page]) do
@@ -266,7 +294,9 @@ end
 function Quick:SetEditing(on)
     if grip then
         grip.from = nil
-        grip:SetShown((on or ns.editMode) and container ~= nil and Settings().enabled and ns.DuoLayout() and true or false)
+        local shown = on and container ~= nil and Settings().enabled and ns.DuoLayout() and true or false
+        grip:SetShown(shown)
+        if outline then outline:SetShown(shown) end
     end
     self:Refresh()
 end
