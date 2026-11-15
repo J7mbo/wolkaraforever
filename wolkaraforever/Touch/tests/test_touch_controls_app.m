@@ -546,17 +546,9 @@ static void AKFixtureInputSource(void *context) {
     assert(AKChatComposer.shared.state == AKChatComposerStateCancelled);
     assert(![controls composerInReviewMode]);
     NSLog(@"chat composer: protected input keeps the Composer out of the password field");
-    // The saved-password key is on the keyboard's row only while the game's password field has
-    // the keyboard: chat and every other field never show it.
-    UIButton *passwordKey = (UIButton *)AKFindInputView(host, @"wolkaraforever.keyboard.key.savedPassword");
-    assert(passwordKey && !passwordKey.hidden);
-    assert([passwordKey.accessibilityLabel isEqual:AKHostLocalized(@"touch.key.savedPassword")]);
     [NSNotificationCenter.defaultCenter postNotificationName:@"AKSecureEventInputDidChangeNotification"
                                                      object:nil userInfo:@{@"enabled": @NO}];
     assert([controls composerInReviewMode]);
-    AKDrainFixtureEvents();
-    assert(passwordKey.hidden);
-    NSLog(@"saved password: the key shows only while the game's password field has the keyboard");
 
     // Background and return: the draft is kept, and nothing is sent while the app is away.
     [controls openChatComposerFromSource:AKChatComposerSourceController];
@@ -768,6 +760,26 @@ static void AKFixtureInputSource(void *context) {
                 [host addSubview:reference];
                 [reference becomeFirstResponder];
                 return;
+            }
+            if (selfTest) {
+                // The saved-password key is on the keyboard's row only while the game's password
+                // field has the keyboard (the Carbon adapter's secure-input notification): chat
+                // and every other field never show it.
+                (void)[controls inputAccessoryView];
+                UIButton *passwordKey = [controls valueForKey:@"_passwordKey"];
+                assert(passwordKey && passwordKey.hidden);
+                assert([passwordKey.accessibilityIdentifier isEqual:@"wolkaraforever.keyboard.key.savedPassword"]);
+                assert([passwordKey.accessibilityLabel isEqual:AKHostLocalized(@"touch.key.savedPassword")]);
+                [NSNotificationCenter.defaultCenter postNotificationName:@"AKSecureEventInputDidChangeNotification"
+                                                                 object:nil userInfo:@{@"enabled": @YES}];
+                AKDrainFixtureEvents();
+                assert(!passwordKey.hidden);
+                [NSNotificationCenter.defaultCenter postNotificationName:@"AKSecureEventInputDidChangeNotification"
+                                                                 object:nil userInfo:@{@"enabled": @NO}];
+                AKDrainFixtureEvents();
+                assert(passwordKey.hidden);
+                puts("SAVED_PASSWORD_KEY_PASS: the key shows only while the game's password field has the keyboard.");
+                fflush(stdout);
             }
             // Standard: the toolbar is where it has always been - just below the top, 252 by 44.
             // Mobile: the bottom centre, between the thumbs, folded into its handle.
