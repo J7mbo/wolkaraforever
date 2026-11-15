@@ -844,3 +844,10 @@
 "chat.composer.settings.done" = "Done";
 "chat.composer.destination.title" = "Name";
 "chat.composer.destination.command" = "Command, for example /say";
+"touch.key.savedPassword" = "Saved password";
+"touch.password.save.title" = "Save your password on this iPhone?";
+"touch.password.save.message" = "It is kept in this device's Keychain behind Face ID or your passcode, never leaves the device, and is typed into the game's password field when you tap the key. Hold the key to forget it.";
+"touch.password.save.placeholder" = "Battle.net password";
+"touch.password.save.confirm" = "Save and log in";
+"touch.password.forget" = "Forget saved password";
+"touch.password.cancel" = "Cancel";
