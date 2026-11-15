@@ -227,6 +227,18 @@ local CLICK = [=[
     end
 ]=]
 
+-- The step button: one tap turns the ring to the next five spells, and from the last five back
+-- to the first. A plain secure click, the one thing the game lets a page turn on in combat.
+local STEP_CLICK = [=[
+    local offset = owner:GetAttribute("offset") or 0
+    local most = owner:GetAttribute("most")
+    local shown = owner:GetAttribute("shown")
+    if offset >= most then offset = 0
+    elseif offset + shown > most then offset = most
+    else offset = offset + shown end
+    owner:SetAttribute("offset", offset)
+]=] .. PLACE
+
 -- ---------------------------------------------------------------------------------------
 -- Motion. `pos` is the ring's rotation in slots: 0 shows spells 1-5, MOST shows 11-15, and a
 -- fraction is between two spells. Everything below is insecure and only draws.
@@ -302,7 +314,7 @@ local function Render(pos)
     end
     if range then
         local first = Nearest(pos) + 1
-        range:SetText(first .. "-" .. (first + SHOWN - 1))
+        range:SetText(first .. "-" .. (first + SHOWN - 1) .. " >")
     end
 end
 
@@ -410,13 +422,10 @@ driver:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 local function PressStarted()
-    if InCombatLockdown() then
-        -- The secure side starts from its own offset; follow the finger from there.
-        motion.startPos = holder:GetAttribute("offset") or 0
-        ShowGhosts()
-    else
-        motion.startPos = motion.mode and motion.pos or (holder:GetAttribute("offset") or 0)
-    end
+    -- In combat the spells stay where the secure code put them and nothing is drawn over them:
+    -- what is on screen is always what a tap casts. The step button turns the ring there.
+    if InCombatLockdown() then motion.mode = nil; return end
+    motion.startPos = motion.mode and motion.pos or (holder:GetAttribute("offset") or 0)
     motion.downAngle = ns.FanCursorAngle()
     motion.raw = motion.startPos
     motion.vel = 0
@@ -537,7 +546,22 @@ function Fan:Init()
     rise:SetFromAlpha(0); rise:SetToAlpha(0.28); rise:SetDuration(0.07); rise:SetOrder(1)
     local fall = flash.anim:CreateAnimation("Alpha")
     fall:SetFromAlpha(0.28); fall:SetToAlpha(0); fall:SetDuration(0.25); fall:SetOrder(2)
-    range = ns.Label(root, "GameFontNormalSmall")
+    -- The range ("1-5 >") is a button: tap it to turn to the next five, in combat too.
+    local step = CreateFrame("Button", "WolkaraMobileFanStep", root, "SecureActionButtonTemplate")
+    step:RegisterForClicks("AnyUp")
+    ns.Box(step, "BACKGROUND", 0.05, 0.05, 0.08, 0.55)
+    SecureHandlerWrapScript(step, "OnClick", holder, STEP_CLICK)
+    step:HookScript("OnClick", function()
+        local offset = holder:GetAttribute("offset") or 0
+        motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
+        if not InCombatLockdown() then Commit(offset) else
+            range:SetText((offset + 1) .. "-" .. (offset + SHOWN) .. " >")
+        end
+        ns.FanFeedback()
+    end)
+    Fan.step = step
+    range = ns.Label(step, "GameFontNormalSmall")
+    range:SetPoint("CENTER")
     range:SetTextColor(1, 0.82, 0.3)
 
     tab = BuildSmall("WolkaraMobileFanTab", "SecureActionButtonTemplate")
@@ -638,8 +662,11 @@ function Fan:Layout()
     jump.iconFrame:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", -radius * 0.42, radius * 0.42)
     jump.icon:SetAllPoints(jump.iconFrame)
     local rx, ry = Polar(outer + size * 0.85, FIRST)
-    range:ClearAllPoints()
-    range:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", rx, ry + size * 0.15)
+    Fan.step:ClearAllPoints()
+    Fan.step:SetSize(math.floor(size * 1.2), math.floor(size * 0.55))
+    Fan.step:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", rx, ry + size * 0.15)
+    Fan.step:SetFrameLevel(root:GetFrameLevel() + 6)
+    Fan.step:Show()
     range:Show()
     local reach = (outer + size * 0.7) * 2
     flash:ClearAllPoints()
