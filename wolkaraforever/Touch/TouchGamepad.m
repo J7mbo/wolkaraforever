@@ -795,6 +795,17 @@ static BOOL AKFloatWheelReserved(void) {
     id value = [NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraForeverWheelDragV1"];
     return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
 }
+// Whether one of this app's own buttons - the toolbar's keyboard, the arrow that shows it, and
+// any other control beside the gamepad in the game's view - is under the point. Those are
+// answered before a stick: a thumb's half of the screen never swallows the app's own button.
+- (BOOL)hostControlAt:(CGPoint)point event:(UIEvent *)event {
+    for (UIView *sibling in self.superview.subviews.reverseObjectEnumerator) {
+        if (sibling == self || sibling.hidden || sibling.alpha < 0.01 || !sibling.userInteractionEnabled) continue;
+        UIView *hit = [sibling hitTest:[self convertPoint:point toView:sibling] withEvent:event];
+        if ([hit isKindOfClass:UIControl.class] && hit.alpha >= 0.01) return YES;
+    }
+    return NO;
+}
 - (UIView *)floatingHit:(CGPoint)point event:(UIEvent *)event {
     CGSize size = self.bounds.size;
     if (size.width <= 0 || size.height <= 0) return nil;
@@ -807,6 +818,7 @@ static BOOL AKFloatWheelReserved(void) {
         CGFloat aw = area[@"w"].doubleValue, ah = area[@"h"].doubleValue;
         if (fx >= ax && fx <= ax + aw && fy >= ay && fy <= ay + ah) return nil;
     }
+    if ([self hostControlAt:point event:event]) return nil;
     // An ability zone is the player's own surface and sits inside a thumb's half, so it is
     // answered before the halves are: a zone under the camera thumb is still the zone.
     for (AKGamepadButton *zone in _zoneButtons) {
