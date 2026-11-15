@@ -48,6 +48,8 @@ local active = 1
 -- The fan on screen: how many spells it has, and the furthest it turns.
 local count, most = COUNT, COUNT - SHOWN
 local JUMP = 0.16
+-- The fan switch: between the jump (out to JUMP) and the ring.
+local SWITCH_RADIUS, SWITCH_ANGLE = 0.20, 45
 
 local DEFAULTS = { enabled = true, size = 56, radius = 30, page = 1, seeded = false, style = "wheel" }
 local DUO_LAYOUT = 2
@@ -626,18 +628,21 @@ function Fan:Init()
     holder, buttons = holders[1], fanButtons[1]
 
     -- The switch: shown when more than one fan is on.
+    -- The switch: the small arrow button between the jump and the fan, where the old page
+    -- button was, shown when more than one fan is on.
     switch = CreateFrame("Button", "WolkaraMobileFanSwitch", root, "SecureHandlerClickTemplate")
     switch:RegisterForClicks("AnyUp")
     for fanIndex = 1, FANS do switch:SetFrameRef("fan" .. fanIndex, holders[fanIndex]) end
     switch:SetAttribute("fans", FANS)
     switch:SetAttribute("active", 1)
     switch:SetAttribute("_onclick", SWITCH)
-    ns.Box(switch, "BACKGROUND", 0.05, 0.05, 0.08, 0.75)
-    local switchHighlight = ns.Box(switch, "HIGHLIGHT", 1, 1, 1, 0.15)
+    ns.Disc(switch, "BACKGROUND", 0.05, 0.05, 0.08, 0.75, 0)
+    switch.arrow = switch:CreateTexture(nil, "ARTWORK")
+    switch.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+    switch.arrow:SetPoint("CENTER")
+    switch.arrow:SetRotation(math.rad(135))
+    local switchHighlight = ns.Disc(switch, "HIGHLIGHT", 1, 1, 1, 0.18, 0)
     switchHighlight:SetBlendMode("ADD")
-    switch.label = ns.Label(switch, "GameFontNormalSmall")
-    switch.label:SetPoint("CENTER")
-    switch.label:SetTextColor(1, 0.82, 0.3)
     switch:HookScript("OnClick", function(self)
         Fan.Activate(self:GetAttribute("active") or 1)
         ns.FanFeedback()
@@ -716,16 +721,6 @@ function Fan.Activate(index)
     motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
     local db = ns.db and ns.db.fan
     if type(db) == "table" then db.active = index end
-    if switch then
-        local on, position = 0, 0
-        for fanIndex = 1, FANS do
-            if switch:GetAttribute("on" .. fanIndex) then
-                on = on + 1
-                if fanIndex == index then position = on end
-            end
-        end
-        switch.label:SetText(position .. "/" .. on)
-    end
     if not InCombatLockdown() then
         if switch then switch:SetAttribute("active", index) end
         for fanIndex, ring in ipairs(holders) do ring:SetShown(fanIndex == index) end
@@ -745,9 +740,10 @@ function ns.FanLockIcon() end
 function ns.FanArrow() end
 function ns.FanTurn() end
 
+-- The ring settled on a new spell: the page-turn sound, unless it is switched off. The gold
+-- flash is kept for running into an end (FanBump).
 function ns.FanFeedback()
     if PlaySound and Settings().sound ~= false then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_ABILITY_PAGE_TURN) or 836, "Master") end
-    if flash and flash.anim then flash.anim:Stop(); flash.anim:Play() end
 end
 
 -- The ring ran into one of its ends: a short flash, and the spring does the bounce.
@@ -837,12 +833,16 @@ function Fan:Layout()
     Fan.step:SetSize(math.floor(size * 1.2), math.floor(size * 0.55))
     Fan.step:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", rx, ry + size * 0.15)
     Fan.step:SetFrameLevel(root:GetFrameLevel() + 6)
-    Fan.step:Show()
-    range:Show()
-    -- The switch sits just above the range, and only when there is another fan to turn to.
+    -- Where the ring is within a fan is plain from the spells themselves, so the range
+    -- ("6-10 >") is not shown; dragging turns the ring, in combat too.
+    Fan.step:Hide()
+    local sx, sy = Polar(height * SWITCH_RADIUS, SWITCH_ANGLE)
+    local switchSize = math.floor(size * 0.62 + 0.5)
     switch:ClearAllPoints()
-    switch:SetSize(math.floor(size * 1.2), math.floor(size * 0.55))
-    switch:SetPoint("BOTTOM", Fan.step, "TOP", 0, 6)
+    switch:SetSize(switchSize, switchSize)
+    switch:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", sx, sy)
+    switch:SetHitRectInsets(-8, -8, -8, -8)
+    switch.arrow:SetSize(switchSize * 1.15, switchSize * 1.15)
     switch:SetFrameLevel(root:GetFrameLevel() + 6)
     switch:SetShown(on > 1)
     local reach = (outer + size * 0.7) * 2

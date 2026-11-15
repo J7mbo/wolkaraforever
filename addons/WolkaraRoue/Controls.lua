@@ -178,7 +178,7 @@ end
 -- spells. With more than one on, a button by the wheel switches between them.
 local function Fans(page)
     local y = 0
-    Text(page, ns.T("Switch fans with the button above the wheel's 1-5."), X1, y, "GameFontHighlightSmall")
+    Text(page, ns.T("Switch fans with the arrow between Jump and the fan."), X1, y, "GameFontHighlightSmall")
     y = y - 28
     local Fan = ns.Fan
     for index = 1, Fan.FANS do
