@@ -147,8 +147,8 @@ function Quick:Init()
     grip = CreateFrame("Button", "WolkaraMobileQuickGrip", UIParent)
     grip:SetFrameStrata("DIALOG")
     ns.Box(grip, "BACKGROUND", 1, 0.82, 0.2, 0.35)
-    grip.label = ns.Label(grip, "GameFontNormalSmall", ns.T("Move"))
-    grip.label:SetPoint("CENTER")
+    grip.label = ns.Label(grip, "GameFontNormalSmall", ns.T("Drag to move the left bar"))
+    grip.label:SetPoint("RIGHT", -10, 0)
     grip:Hide()
     local function CursorPoints()
         local x, y = GetCursorPosition()
@@ -220,7 +220,9 @@ function Quick:Layout()
     handle:SetPoint("TOPLEFT", UIParent, "TOPLEFT", left, -(top + (height - TAB_H) / 2))
 
     grip:ClearAllPoints()
-    grip:SetSize(blockW, 22)
+    -- Wide, and reaching well to the right: the bar's own left edge is where a camera cut-out
+    -- sits, so the part of the grip a finger can reach has to be beyond it.
+    grip:SetSize(math.max(blockW + 170, 220), 28)
     grip:SetPoint("BOTTOMLEFT", UIParent, "TOPLEFT", left, -(top - 4))
     grip:SetShown((ns.editing or ns.editMode) and true or false)
 
@@ -317,11 +319,14 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 3, MAX_SLOTS)
     elseif command == "size" and number then quick.size = ns.Clamp(number, 36, 64)
     elseif command == "reset" then quick.offset = { x = 0, y = 0 }
+    elseif command == "x" and number then quick.offset.x = number
+    elseif command == "y" and number then quick.offset.y = number
     else
-        ns.Print("/mobile quick on, off, count 3-5, size 36-64, reset (position). Now: " .. (quick.enabled and "on" or "off")
+        ns.Print("/mobile quick on, off, count 3-5, size 36-64, x <points right>, y <points down>, reset (position). Now: " .. (quick.enabled and "on" or "off")
             .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
         return
     end
     ns.MarkChanged(); ns.Layout(); ns.Refresh()
-    ns.Print("quick bar " .. (quick.enabled and "on" or "off") .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
+    ns.Print("quick bar " .. (quick.enabled and "on" or "off") .. ", " .. quick.count .. " slots per page, size " .. quick.size
+        .. ", moved " .. math.floor(quick.offset.x + 0.5) .. " right, " .. math.floor(quick.offset.y + 0.5) .. " down.")
 end
