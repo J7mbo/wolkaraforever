@@ -130,8 +130,29 @@ local function Combat(page)
     Stepper(page, X2 + 100, y + ROW_H, function() return fan().size end, function(v) fan().size = v end, 4, 40, 80)
     y = Row(page, y, ns.T("Reach"))
     Stepper(page, X2, y + ROW_H, function() return fan().radius end, function(v) fan().radius = v end, 2, 22, 50, "%")
-    Switch(page, X2 + 150, y + ROW_H, function() return fan().sound ~= false end, function(v) fan().sound = v end,
+    -- The spinning wheel's page-turn sound (the classic fan has no switch for it).
+    local sound = Switch(page, X2 + 150, y + ROW_H, function() return fan().sound ~= false end, function(v) fan().sound = v end,
         ns.T("Sound"), ns.T("Silent"), 90)
+    updaters[#updaters + 1] = function() sound:SetShown(ns.FanMode() == "spin") end
+    -- Fan style: the classic fan as a turning wheel or as pages (two pages of ten, a button to
+    -- flip between them), or the spinning wheel (up to four fans of up to fifteen spells that
+    -- turn in combat too). A change of fan takes effect when the settings close and reload.
+    y = Row(page, y, ns.T("Fan style"))
+    local styleButton = Button(page, X2, y + ROW_H, "", 180, function()
+        if InCombatLockdown() then return Apply() end
+        local stored = fan()
+        if ns.FanMode() == "spin" then stored.mode, stored.style = "classic", "wheel"
+        elseif stored.style == "wheel" then stored.style = "pages"
+        else stored.mode = "spin" end
+        ns.MarkChanged("fan style")
+        Apply()
+    end)
+    local afterReload = Text(page, ns.T("Applies on Close."), X2 + 190, y + ROW_H - 8, "GameFontHighlightSmall")
+    updaters[#updaters + 1] = function()
+        local spin = ns.FanMode() == "spin"
+        styleButton.text:SetText(spin and ns.T("Spinning wheel") or (fan().style == "wheel" and ns.T("Wheel") or ns.T("Pages")))
+        afterReload:SetShown(ns.FanBuilt ~= nil and ns.FanBuilt ~= ns.FanMode())
+    end
     y = Row(page, y, ns.T("Quick bar"))
     Switch(page, X2, y + ROW_H, function() return quick().enabled end, function(v) quick().enabled = v end)
     Stepper(page, X2 + 100, y + ROW_H, function() return quick().count end, function(v) quick().count = v end, 1, 1, 5)
@@ -184,7 +205,7 @@ local function Fans(page)
     local y = 0
     Text(page, ns.T("Switch fans with the arrow between Jump and the fan."), X1, y, "GameFontHighlightSmall")
     y = y - 28
-    local Fan = ns.Fan
+    local Fan = ns.FanSpin
     for index = 1, Fan.FANS do
         local function settings() return Fan.Settings().fans[index] end
         y = Row(page, y, ns.T("Fan") .. " " .. index)
@@ -249,10 +270,10 @@ local function Build()
     Fans(duoPane)
     Wheels(standardPane)
     updaters[#updaters + 1] = function()
-        local duo = ns.DuoLayout()
-        duoPane:SetShown(duo); standardPane:SetShown(not duo)
+        local fans = ns.DuoLayout() and ns.FanMode() == "spin"
+        duoPane:SetShown(fans); standardPane:SetShown(not fans)
         local nav = navButtons.wheels
-        if nav and nav.text then nav.text:SetText(duo and ns.T("Fans") or ns.T("Spell wheels")) end
+        if nav and nav.text then nav.text:SetText(fans and ns.T("Fans") or ns.T("Spell wheels")) end
     end
 
     local credits = ns.Label(panel, "GameFontHighlightSmall", CREDITS)

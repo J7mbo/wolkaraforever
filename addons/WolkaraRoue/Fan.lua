@@ -1,4 +1,5 @@
--- Corner skill wheel (iPhone Duo layout).
+-- Corner skill wheel (iPhone Duo layout): the spinning wheel, chosen with Fan style; the
+-- classic fan (FanClassic.lua) is the fan otherwise.
 --
 -- A ring of up to fifteen spells around the bottom-right corner, five in view at a time, and up
 -- to four such fans with a button to switch between them. Drag a spell along the arc and the
@@ -12,8 +13,8 @@
 -- on the ring into wheel ticks), and the switch is a secure click.
 local _, ns = ...
 
-local Fan = ns.Register("Corner fan", {})
-ns.Fan = Fan
+local Fan = ns.Register("Corner fan (spinning)", {})
+ns.FanSpin = Fan
 
 -- Up to FANS fans share the corner, one on screen at a time, each with its own spells and its
 -- own number of them (MIN_COUNT to COUNT). The switch button turns to the next fan that is on.
@@ -102,7 +103,6 @@ local function Settings()
     end
     fan.size = ns.Clamp(tonumber(fan.size) or 56, 40, 80)
     fan.radius = ns.Clamp(tonumber(fan.radius) or 30, 22, 50)
-    fan.page, fan.style = 1, "wheel"
     return fan
 end
 
@@ -467,6 +467,8 @@ ns.On("PLAYER_REGEN_DISABLED", function()
 end)
 
 function Fan:Init()
+    if ns.FanMode() ~= "spin" then return end
+    ns.FanBuilt = "spin"
     ns.DuoLayout()
     local fan = Settings()
     Seed(fan)
@@ -616,7 +618,8 @@ end
 function Fan:Layout()
     if not root or InCombatLockdown() then return end
     local fan = Settings()
-    if not fan.enabled or not ns.DuoLayout() then root:Hide(); return end
+    -- The classic fan was chosen: it takes over once the interface reloads.
+    if not fan.enabled or not ns.DuoLayout() or ns.FanMode() ~= "spin" then root:Hide(); return end
 
     local height = UIParent:GetHeight()
     local outer = height * fan.radius / 100
@@ -761,7 +764,7 @@ end
 local slash = SlashCmdList.WOLKARAMOBILE
 SlashCmdList.WOLKARAMOBILE = function(message)
     local command, value = (message or ""):lower():match("^%s*fan%s*(%S*)%s*(%S*)")
-    if not command or not ns.db then return slash(message) end
+    if not command or not ns.db or ns.FanMode() ~= "spin" then return slash(message) end
     if InCombatLockdown() then ns.Print("change the fan out of combat."); return end
     local fan = Settings()
     local number = tonumber(value)

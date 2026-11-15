@@ -50,9 +50,29 @@ local function Load(file)
     return modules
 end
 
+Load("FanClassic.lua")
 Load("Fan.lua")
-assert(ns.Fan, "Fan.lua registered no module")
+Load("FanSelect.lua")
+assert(ns.FanClassic and ns.FanSpin and ns.Fan, "the fans or their selector registered nothing")
+
+-- The classic fan is the default: two pages of ten, a turning wheel or pages.
+assert(ns.FanMode() == "classic", "the spinning wheel is the default")
 local fan = ns.Fan.Settings()
+assert(fan.enabled == true and fan.size == 56 and fan.radius == 30, "the fan's defaults are not what ships")
+assert(fan.page == 1 and fan.style == "wheel" and fan.duoLayout == 2)
+assert(fan.fans == nil, "the classic fan grew the spinning wheel's fans")
+assert(ns.Fan:Enabled() == true, "the fan is off in the Duo layout")
+ns.db.fan.page, ns.db.fan.offsets, ns.db.fan.style = 7, { 9, -3 }, "star"
+fan = ns.Fan.Settings()
+assert(fan.page == 1 and fan.offsets[1] == 5 and fan.offsets[2] == 0, "a classic value escaped its range")
+assert(fan.style == "pages", "an unknown classic style was kept")
+ns.db.fan.style = "wheel"
+
+-- The spinning wheel, chosen with Fan style.
+ns.db = {}
+ns.db.fan = { mode = "spin" }
+assert(ns.FanMode() == "spin")
+fan = ns.Fan.Settings()
 assert(fan.enabled == true and fan.size == 56 and fan.radius == 30, "the fan's defaults are not what ships")
 assert(fan.page == 1 and fan.style == "wheel" and fan.duoLayout == 2)
 assert(fan.offsets[1] == 0 and fan.offsets[2] == 0, "a fresh fan starts off-centre")
@@ -67,7 +87,7 @@ for index = 2, 4 do
 end
 assert(fan.active == 1, "a fresh fan does not start on fan 1")
 -- A save a hand edit put outside the ranges the settings page offers is brought back inside.
-ns.db.fan.size, ns.db.fan.radius, ns.db.fan.page = 500, 1, 7
+ns.db.fan.size, ns.db.fan.radius = 500, 1
 ns.db.fan.offsets = { 99, -3, 4 }
 ns.db.fan.fans[1].on, ns.db.fan.fans[1].count = false, 40
 ns.db.fan.fans[2] = { on = true, count = 99 }
@@ -75,7 +95,6 @@ ns.db.fan.fans[3] = { count = 1 }
 ns.db.fan.active = 9
 fan = ns.Fan.Settings()
 assert(fan.size == 80 and fan.radius == 22, "a stored fan size or radius escaped its range")
-assert(fan.page == 1, "a stored page was kept")
 assert(fan.fans[1].on == true and fan.fans[1].count == 15, "fan 1 was switched off or outgrew fifteen")
 assert(fan.fans[2].on == true and fan.fans[2].count == 15, "fan 2's count escaped its range")
 assert(fan.fans[3].on == false and fan.fans[3].count == 5, "fan 3's count escaped its range")
@@ -86,11 +105,12 @@ ns.db.fan.active = 2
 assert(ns.Fan.Settings().active == 2)
 ns.db.fan.fans[2].on = false
 assert(ns.Fan.Settings().active == 1, "a switched-off fan stayed on screen")
-ns.db.fan.style = "star"
-assert(ns.Fan.Settings().style == "wheel", "an unknown fan style was kept")
+-- The classic fan's style is the classic fan's: the spinning wheel leaves it alone.
+ns.db.fan.style = "pages"
+assert(ns.Fan.Settings().style == "pages", "the spinning wheel rewrote the classic fan's style")
 -- A save from the two pages of ten: page 2's first five spells fill the empty slots 11-15 once,
 -- a slot already filled is kept, and page 2 itself is left for an older build.
-ns.db.fan = { pages = { { [12] = { kind = "spell", id = 99 } },
+ns.db.fan = { mode = "spin", pages = { { [12] = { kind = "spell", id = 99 } },
     { { kind = "spell", id = 1 }, { kind = "spell", id = 2 }, { kind = "spell", id = 3 } } } }
 fan = ns.Fan.Settings()
 assert(fan.ring15 == true and fan.pages[1][11].id == 1 and fan.pages[1][12].id == 99 and fan.pages[1][13].id == 3,
@@ -135,4 +155,4 @@ ns.db.quick.enabled = true
 duo = false
 assert(ns.Quick:Enabled() == false, "the quick bar is on in the Standard interface")
 
-print("mobile add-on Duo arrangements: the fan (four fans, 5-15 spells each, fan 1 always on, page 2 into slots 11-15 once) and the quick bar (1-5 circles, a kept position) fill their defaults, keep every stored value in range, repair a hand-edited one, take a pre-pages save once, and are on only in the Duo layout: PASS")
+print("mobile add-on Duo arrangements: the classic fan by default (two pages of ten, wheel or pages) and the spinning wheel when chosen (four fans, 5-15 spells each, fan 1 always on, page 2 into slots 11-15 once) and the quick bar (1-5 circles, a kept position) fill their defaults, keep every stored value in range, repair a hand-edited one, take a pre-pages save once, and are on only in the Duo layout: PASS")
