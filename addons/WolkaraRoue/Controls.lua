@@ -105,6 +105,10 @@ local function General(page)
     y = Row(page, y, ns.T("Windows"))
     Switch(page, X2, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().size == "large" end,
         function(v) if ns.Placement then ns.Placement.Settings().size = v and "large" or "fit" end end, ns.T("Large"), ns.T("Fit"), 150)
+    y = Row(page, y, ns.T("Screen edges"))
+    Stepper(page, X2, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().edge or 7 end,
+        function(v) if ns.Placement then ns.Placement.Settings().edge = v end end, 1, 0, 15, ns.T("%"))
+    Text(page, ns.T("Keeps windows clear of the Dynamic Island."), X2 + 150, y + ROW_H - 8, "GameFontHighlightSmall")
     y = Row(page, y, ns.T("Positions"))
     Button(page, X2, y + ROW_H, ns.T("Customize"), 150, function() panel:Hide(); ns.SetEditing(true) end)
     Button(page, X3, y + ROW_H, ns.T("Reset positions"), 180, function()
