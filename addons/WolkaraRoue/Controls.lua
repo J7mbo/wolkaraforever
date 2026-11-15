@@ -126,6 +126,8 @@ local function Combat(page)
     Stepper(page, X2 + 100, y + ROW_H, function() return fan().size end, function(v) fan().size = v end, 4, 40, 80)
     y = Row(page, y, ns.T("Reach"))
     Stepper(page, X2, y + ROW_H, function() return fan().radius end, function(v) fan().radius = v end, 2, 22, 50, "%")
+    Switch(page, X2 + 150, y + ROW_H, function() return fan().sound ~= false end, function(v) fan().sound = v end,
+        ns.T("Sound"), ns.T("Silent"), 90)
     y = Row(page, y, ns.T("Quick bar"))
     Switch(page, X2, y + ROW_H, function() return quick().enabled end, function(v) quick().enabled = v end)
     Stepper(page, X2 + 100, y + ROW_H, function() return quick().count end, function(v) quick().count = v end, 1, 1, 5)

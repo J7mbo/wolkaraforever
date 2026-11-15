@@ -6,7 +6,8 @@
 # down on that ring and moves is now sent as wheel notches - one per spell, 18 degrees of
 # travel around the corner - with the pointer resting where the finger came down, which is
 # where the wheel listens. A flick keeps turning for a moment after the finger lifts. A tap
-# there is still a tap and a hold still a right click; only a drag changes.
+# there is still a tap and a hold still a right click; only a drag changes. Each notch ticks
+# the phone's haptics unless the touch controls' Haptics switch is off.
 #
 # Gated: direct touch in the mobile interface only, and WolkaraForeverWheelDragV1 = NO turns
 # it off and gives the corner back to the camera.
@@ -15,7 +16,7 @@
 # Upstream: no (it serves one add-on's layout).
 #
 diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
-index 32095d0..edf726b 100644
+index 32095d0..c8857b4 100644
 --- a/translation/AppKit/AppKit.m
 +++ b/translation/AppKit/AppKit.m
 @@ -317,6 +317,14 @@ static BOOL AKMobileInterface(void) {
@@ -41,7 +42,7 @@ index 32095d0..edf726b 100644
      if (_pressedLeft) [self postMouse:NSEventTypeLeftMouseUp at:_last button:0];
      if (_pressedRight) [self postMouse:NSEventTypeRightMouseUp at:_last button:1];
  }
-@@ -737,6 +746,82 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -737,6 +746,87 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          [self postScrollNotch:direction];
      }
  }
@@ -56,6 +57,12 @@ index 32095d0..edf726b 100644
 +static const CGFloat AKWheelFriction = 3.2, AKWheelCoastMin = 45, AKWheelFlick = 90;
 +static BOOL AKWheelDragEnabled(void) {
 +    id value = [NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraForeverWheelDragV1"];
++    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
++}
++// The tick on each notch follows the touch controls' own Haptics switch.
++static BOOL AKWheelHaptics(void) {
++    NSDictionary *layout = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"WolkaraForeverTouchLayoutV1"];
++    id value = layout[@"hapticsEnabled"];
 +    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
 +}
 +// Degrees around the bottom-right corner: 0 along the bottom edge, 90 up the right edge.
@@ -74,8 +81,7 @@ index 32095d0..edf726b 100644
 +        CGFloat direction = _spinCarry > 0 ? 1 : -1;
 +        _spinCarry -= direction * AKWheelStep;
 +        [self postScrollNotch:direction];
-+        [_spinTick selectionChanged];
-+        [_spinTick prepare];
++        if (AKWheelHaptics()) { [_spinTick selectionChanged]; [_spinTick prepare]; }
 +    }
 +}
 +- (void)stopWheelCoast { [_spinCoast invalidate]; _spinCoast = nil; }
@@ -124,7 +130,7 @@ index 32095d0..edf726b 100644
  - (BOOL)directGestureActive { return _directTouch != nil || _directMulti; }
  - (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
      if ([self handleTrackpadTouches:t event:ev]) return;
-@@ -747,6 +832,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -747,6 +837,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          _directTouch = t.anyObject;
          _last = [_directTouch locationInView:self];
          _directStart = _last; _directPending = YES; _directHeld = NO;
@@ -134,7 +140,7 @@ index 32095d0..edf726b 100644
          // The pointer moves under the finger first, so the game knows what is there before
          // any button is pressed.
          [self postMouse:NSEventTypeMouseMoved at:_last button:0];
-@@ -769,8 +857,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -769,8 +862,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
      if ([self directGestureActive]) {
          if (_directMulti || ![t containsObject:_directTouch]) return;
          CGPoint point = [_directTouch locationInView:self];
@@ -149,7 +155,7 @@ index 32095d0..edf726b 100644
              [self cancelDirectHold];
              BOOL turn = _directHeld;
              _directPending = NO; _directHeld = NO;
-@@ -798,7 +892,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -798,7 +897,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          if (!_directMulti && [t containsObject:_directTouch]) {
              [self cancelDirectHold];
              CGPoint point = [_directTouch locationInView:self];
@@ -160,7 +166,7 @@ index 32095d0..edf726b 100644
                  _directPending = NO;
                  [self postMouse:NSEventTypeLeftMouseDown at:_directStart button:0];
                  [self postMouse:NSEventTypeLeftMouseUp at:_directStart button:0];
-@@ -821,7 +917,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -821,7 +922,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
      if ([self directGestureActive]) {
          // A cancelled gesture clicks nothing; whatever it held is let go.
          [self cancelDirectHold];
