@@ -14,6 +14,17 @@ FOUNDATION_EXPORT NSNotificationName const AKGamepadTapThroughNotification;
 // A floating stick held still, then dragged: the drag belongs to the game. userInfo phase
 // (began, moved, ended) and x/y in window coordinates.
 FOUNDATION_EXPORT NSNotificationName const AKGamepadDragThroughNotification;
+// The ring an installed interface's spinning spell wheel takes around the bottom-right corner,
+// as WolkaraRoue last saved it: @{inner, outer}, each a share of the screen height, under this
+// key in the standard user defaults; absent while no such wheel is on. Floating sticks leave
+// that ring to the game, and the view the game draws in turns a drag there into wheel notches.
+FOUNDATION_EXPORT NSString *const AKSpellWheelDefaultsKey;
+// The ring in the text of a WolkaraRoue.lua saved-variables file, or nil when it has none.
+NSDictionary<NSString *, NSNumber *> *_Nullable AKSpellWheelRingFromSavedVariables(NSString *text);
+// Reads the newest WolkaraRoue.lua under <documents>/World of Warcraft/<edition>/WTF/Account/
+// <account>/SavedVariables and publishes its ring under AKSpellWheelDefaultsKey. It reads a
+// file only when a newer one appears, and with no such file it leaves the key as it is.
+void AKSpellWheelPublishFromDocuments(NSString *documents);
 // Owns only our virtual device. Physical controllers and their handlers stay
 // with GameController/the guest. No game events or memory are inspected.
 @interface AKTouchGamepad : NSObject

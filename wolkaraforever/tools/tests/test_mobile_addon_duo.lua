@@ -155,4 +155,23 @@ ns.db.quick.enabled = true
 duo = false
 assert(ns.Quick:Enabled() == false, "the quick bar is on in the Standard interface")
 
-print("mobile add-on Duo arrangements: the classic fan by default (two pages of ten, wheel or pages) and the spinning wheel when chosen (four fans, 5-15 spells each, fan 1 always on, page 2 into slots 11-15 once) and the quick bar (1-5 circles, a kept position) fill their defaults, keep every stored value in range, repair a hand-edited one, take a pre-pages save once, and are on only in the Duo layout: PASS")
+-- The ring the app leaves to the spinning wheel is saved for it only while that wheel is on,
+-- as shares of the screen height that follow the wheel's own reach; otherwise wheel is false.
+local ring = modules["Spell wheel ring"]
+assert(ring and ring.Layout, "nothing saves the spell wheel's ring for the app")
+ns.db.fan = { mode = "classic" }
+ns.FanSpin.ring = { inner = 0.17, outer = 0.35 }
+ring:Layout()
+assert(WolkaraRoueTouch.wheel == false and WolkaraRoueTouch.outer == nil, "the classic fan claimed the spinning wheel's ring")
+ns.db.fan.mode = "spin"
+ring:Layout()
+assert(WolkaraRoueTouch.wheel == true and WolkaraRoueTouch.inner == 0.17 and WolkaraRoueTouch.outer == 0.35,
+    "the spinning wheel's ring was not saved for the app")
+ns.FanSpin.ring = { inner = 0.17, outer = 0.354999 }
+ring:Layout()
+assert(WolkaraRoueTouch.outer == 0.355, "the ring was saved with more digits than the app needs")
+ns.FanSpin.ring = nil
+ring:Layout()
+assert(WolkaraRoueTouch.wheel == false, "a wheel that is off still claims its ring")
+
+print("mobile add-on Duo arrangements: the classic fan by default (two pages of ten, wheel or pages) and the spinning wheel when chosen (four fans, 5-15 spells each, fan 1 always on, page 2 into slots 11-15 once) and the quick bar (1-5 circles, a kept position) fill their defaults, keep every stored value in range, repair a hand-edited one, take a pre-pages save once, and are on only in the Duo layout; the spinning wheel alone saves its ring for the app: PASS")

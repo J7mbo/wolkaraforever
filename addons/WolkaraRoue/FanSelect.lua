@@ -29,3 +29,20 @@ ns.Fan = setmetatable({}, {
         end
     end,
 })
+
+-- The ring the app leaves to the spinning wheel. The app cannot see the game's frames, so the
+-- wheel's ring - inner and outer edge as shares of the screen height from the bottom-right
+-- corner, following Reach and the spell size - is saved for it here, in an account-wide saved
+-- variable the game writes when the interface reloads (closing the settings) or the player logs
+-- out. Floating sticks leave that ring to the game and a drag in it turns the wheel; with the
+-- classic fan, the fan off or another layout, wheel is false and the corner is the sticks'.
+local function Share(value) return math.floor(value * 1000 + 0.5) / 1000 end
+local Ring = ns.Register("Spell wheel ring", {})
+function Ring:Layout()
+    local ring = ns.FanMode() == "spin" and ns.FanSpin and ns.FanSpin.ring
+    if ring then
+        WolkaraRoueTouch = { version = 1, wheel = true, inner = Share(ring.inner), outer = Share(ring.outer) }
+    else
+        WolkaraRoueTouch = { version = 1, wheel = false }
+    end
+end

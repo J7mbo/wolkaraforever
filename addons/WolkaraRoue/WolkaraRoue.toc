@@ -4,6 +4,7 @@
 ## Author: scarrdi94, pookee (ExoGroupe)
 ## Version: 1.0.4
 ## SavedVariablesPerCharacter: WolkaraRoueDB
+## SavedVariables: WolkaraRoueTouch
 
 Core.lua
 Language.lua

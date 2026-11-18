@@ -15,6 +15,78 @@
 #define AKGamepadLog(...) NSLog(@"[ak] %@", [NSString stringWithFormat:__VA_ARGS__])
 #endif
 
+#pragma mark - The spell wheel's ring, as the add-on saved it
+
+// WolkaraRoue's spinning wheel is drawn by the game, so only the add-on knows where its spells
+// are. It keeps the ring they need - the inner and outer edge, as shares of the screen height
+// from the bottom-right corner - in its account-wide saved variables (WolkaraRoueTouch), which
+// the game writes to WTF/Account/<account>/SavedVariables/WolkaraRoue.lua when the interface
+// reloads or the player logs out. So the ring follows the add-on's own Reach and spell size,
+// and is there only while its Fan style is the spinning wheel: nothing about it is set here.
+NSString *const AKSpellWheelDefaultsKey = @"WolkaraForeverSpellWheelV1";
+
+NSDictionary<NSString *, NSNumber *> *AKSpellWheelRingFromSavedVariables(NSString *text) {
+    NSRange start = [text rangeOfString:@"WolkaraRoueTouch = {"];
+    if (start.location == NSNotFound) return nil;
+    NSRange rest = NSMakeRange(NSMaxRange(start), text.length - NSMaxRange(start));
+    NSRange end = [text rangeOfString:@"}" options:0 range:rest];
+    if (end.location == NSNotFound) return nil;
+    NSString *table = [text substringWithRange:NSMakeRange(rest.location, end.location - rest.location)];
+    NSRegularExpression *field = [NSRegularExpression regularExpressionWithPattern:
+        @"\\[\"(wheel|inner|outer)\"\\]\\s*=\\s*([A-Za-z0-9.\\-]+)" options:0 error:NULL];
+    NSMutableDictionary<NSString *, NSString *> *values = [NSMutableDictionary new];
+    for (NSTextCheckingResult *match in [field matchesInString:table options:0 range:NSMakeRange(0, table.length)])
+        values[[table substringWithRange:[match rangeAtIndex:1]]] = [table substringWithRange:[match rangeAtIndex:2]];
+    if (![values[@"wheel"] isEqualToString:@"true"]) return nil;
+    double inner = values[@"inner"].doubleValue, outer = values[@"outer"].doubleValue;
+    // A hand-edited or damaged file cannot take the whole screen from the sticks.
+    if (!isfinite(inner) || !isfinite(outer) || inner < 0 || outer <= inner || outer > 1) return nil;
+    return @{@"inner": @(inner), @"outer": @(outer)};
+}
+
+void AKSpellWheelPublishFromDocuments(NSString *documents) {
+    static NSString *lastPath;
+    static NSDate *lastStamp;
+    NSFileManager *files = NSFileManager.defaultManager;
+    NSString *games = [documents stringByAppendingPathComponent:@"World of Warcraft"];
+    NSString *newest = nil;
+    NSDate *newestStamp = nil;
+    for (NSString *edition in [files contentsOfDirectoryAtPath:games error:NULL]) {
+        NSString *accounts = [games stringByAppendingPathComponent:[edition stringByAppendingPathComponent:@"WTF/Account"]];
+        for (NSString *account in [files contentsOfDirectoryAtPath:accounts error:NULL]) {
+            NSString *path = [accounts stringByAppendingPathComponent:
+                [account stringByAppendingPathComponent:@"SavedVariables/WolkaraRoue.lua"]];
+            NSDate *stamp = [files attributesOfItemAtPath:path error:NULL].fileModificationDate;
+            if (stamp && (!newestStamp || [stamp compare:newestStamp] == NSOrderedDescending)) {
+                newest = path; newestStamp = stamp;
+            }
+        }
+    }
+    if (!newest || ([newest isEqualToString:lastPath] && [newestStamp isEqualToDate:lastStamp])) return;
+    lastPath = newest; lastStamp = newestStamp;
+    NSData *data = [NSData dataWithContentsOfFile:newest];
+    if (data.length > 4 * 1024 * 1024) return;
+    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+        ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+    NSDictionary *ring = text ? AKSpellWheelRingFromSavedVariables(text) : nil;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (ring) [defaults setObject:ring forKey:AKSpellWheelDefaultsKey];
+    else [defaults removeObjectForKey:AKSpellWheelDefaultsKey];
+    AKGamepadLog(@"touch gamepad: spell wheel ring %@", ring
+        ? [NSString stringWithFormat:@"%.2f-%.2f of the height", [ring[@"inner"] doubleValue], [ring[@"outer"] doubleValue]]
+        : @"off");
+}
+
+// At most once a second: a stat of a few folders, and a read only when the add-on saved again.
+static void AKSpellWheelRefresh(void) {
+    static NSTimeInterval last;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (last > 0 && now - last < 1) return;
+    last = now;
+    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (documents) AKSpellWheelPublishFromDocuments(documents);
+}
+
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (!isfinite(point.x) || !isfinite(point.y) || !isfinite(size.width) || !isfinite(size.height) ||
         size.width <= 0 || size.height <= 0) return CGPointZero;
@@ -356,7 +428,6 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
     UILabel *_hint;
     UISwitch *_editSwitch, *_hapticsSwitch, *_overlaySwitch, *_swapShouldersSwitch, *_sticksOnlySwitch;
     UISwitch *_floatingSwitch, *_simpleSwitch, *_stickButtonsSwitch;
-    UISwitch *_wheelAreaSwitch;
     UIButton *_addZoneButton, *_clearZoneButton;
     // The ability zones on screen, in the order the layout lists them.
     NSMutableArray<AKGamepadButton *> *_zoneButtons;
@@ -846,9 +917,6 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
 // everywhere else - including any area the player reserved - is not ours, so the touch goes on
 // to whatever is underneath. Nothing here forwards a touch by hand: returning nil is the app's
 // own hit-testing doing it.
-// The spell wheel's ring, as shares of the height: from just beyond the jump to past the
-// outermost spells at any of the wheel's own reach settings.
-static const CGFloat AKFloatWheelInner = 0.17, AKFloatWheelOuter = 0.60;
 // Whether one of this app's own buttons - the toolbar's keyboard, the arrow that shows it, and
 // any other control beside the gamepad in the game's view - is under the point. Those are
 // answered before a stick: a thumb's half of the screen never swallows the app's own button.
@@ -884,10 +952,14 @@ static const CGFloat AKFloatWheelInner = 0.17, AKFloatWheelOuter = 0.60;
         AKGamepadButton *jump = _jumpButton;
         return jump.enabled ? jump : nil;
     }
-    // The spell wheel, when the layout has one, belongs to the game: a tap there casts and a drag
-    // turns the wheel instead of growing the camera stick. It is the player's own layout data,
-    // like a reserved area; the touch layer turns a drag in it into wheel notches.
-    if (_preferences.wheelArea && corner >= AKFloatWheelInner * h && corner <= AKFloatWheelOuter * h) return nil;
+    // The spinning spell wheel, while the add-on has one on, belongs to the game: a tap there
+    // casts and a drag turns the wheel instead of growing the camera stick. Its ring is the one
+    // the add-on saved, so it is exactly as wide as the spells; the touch layer turns a drag in
+    // it into wheel notches.
+    AKSpellWheelRefresh();
+    NSDictionary *ring = [NSUserDefaults.standardUserDefaults dictionaryForKey:AKSpellWheelDefaultsKey];
+    CGFloat ringInner = [ring[@"inner"] doubleValue], ringOuter = [ring[@"outer"] doubleValue];
+    if (ringOuter > ringInner && corner >= ringInner * h && corner <= ringOuter * h) return nil;
     if (fx <= AKFloatLeftMaxX && (fy >= AKFloatLeftLowY || (fx >= AKFloatLeftMinX && fy >= AKFloatLeftMinY)))
         return [self stickHeld:_leftStick event:event] ? _sink : _leftStick;
     if (fx >= AKFloatRightMinX && fy >= AKFloatRightMinY && fy <= AKFloatRightMaxY)
@@ -1144,19 +1216,6 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
         UIStackView *floatingRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.floatingSticks")],_floatingSwitch]];
         floatingRow.axis = UILayoutConstraintAxisHorizontal; floatingRow.alignment = UIStackViewAlignmentCenter;
         [options addArrangedSubview:floatingRow];
-        // The spell wheel: drags on an installed interface's wheel in the bottom-right corner turn
-        // it, and floating sticks leave it alone.
-        _wheelAreaSwitch = [UISwitch new]; _wheelAreaSwitch.on = _preferences.wheelArea;
-        _wheelAreaSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.wheelArea");
-        _wheelAreaSwitch.accessibilityHint = AKHostLocalized(@"touch.settings.wheelArea.hint");
-        _wheelAreaSwitch.accessibilityIdentifier = @"wolkaraforever.controls.wheelArea";
-        [_wheelAreaSwitch addTarget:self action:@selector(wheelAreaChanged:) forControlEvents:UIControlEventValueChanged];
-        UIStackView *wheelRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.wheelArea")],_wheelAreaSwitch]];
-        wheelRow.axis = UILayoutConstraintAxisHorizontal; wheelRow.alignment = UIStackViewAlignmentCenter;
-        [options addArrangedSubview:wheelRow];
-        UILabel *wheelHint = [self label:AKHostLocalized(@"touch.settings.wheelArea.hint")];
-        wheelHint.font = [UIFont systemFontOfSize:13]; wheelHint.textColor = [UIColor colorWithWhite:1 alpha:.65];
-        [options addArrangedSubview:wheelHint];
     }
     // Triggers on the outside is a choice about two controls Simple does not draw, so in Simple
     // the row stays where it is and its switch is not usable. A row that vanished and came back
@@ -1278,10 +1337,6 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     [self reset]; _preferences.floatingSticks = sender.on; [_preferences save];
     [self updateAppearance];
 }
-- (void)wheelAreaChanged:(UISwitch *)sender {
-    [self reset]; _preferences.wheelArea = sender.on; [_preferences save];
-    [self updateAppearance];
-}
 - (void)hapticsChanged:(UISwitch *)sender {
     _preferences.hapticsEnabled = sender.on; [_preferences save];
     if (self.configurationChanged) self.configurationChanged();
@@ -1294,7 +1349,6 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     if (!sender.on) return;
     [self reset]; _editing = YES; [_settings removeFromSuperview]; _settings = nil;
     _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _overlaySwitch = nil; _swapShouldersSwitch = nil; _sticksOnlySwitch = nil; _floatingSwitch = nil; _settingsColumns = nil;
-    _wheelAreaSwitch = nil;
     _simpleSwitch = nil; _stickButtonsSwitch = nil; _addZoneButton = nil; _clearZoneButton = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
     // The zones' own menus (which button each sends) belong to the editor.
@@ -1307,7 +1361,6 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _overlaySwitch.on = _preferences.performanceOverlayEnabled;
     _sticksOnlySwitch.on = _preferences.sticksOnly; _floatingSwitch.on = _preferences.floatingSticks;
-    _wheelAreaSwitch.on = _preferences.wheelArea;
     _simpleSwitch.on = _preferences.mode == AKGamepadLayoutModeSimple;
     _stickButtonsSwitch.on = _preferences.stickButtonsEnabled;
     [self syncAbilityZones]; [self updateSettingsZoneCount];
@@ -1316,7 +1369,6 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
 - (void)finishConfiguration {
     [self reset]; [_preferences save]; _editing = NO; [_dragOrigins removeAllObjects];
     [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _overlaySwitch = nil; _swapShouldersSwitch = nil; _sticksOnlySwitch = nil; _floatingSwitch = nil; _settingsColumns = nil;
-    _wheelAreaSwitch = nil;
     _simpleSwitch = nil; _stickButtonsSwitch = nil; _addZoneButton = nil; _clearZoneButton = nil;
     [self syncAbilityZones];
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
@@ -1355,6 +1407,13 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
         _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
         [host addSubview:_overlay];
         __weak AKTouchGamepad *weakSelf = self;
+        // The view the game draws in turns drags on the spell wheel whether or not the sticks
+        // float, so the ring is kept current here too, not only when a stick is touched.
+        AKSpellWheelRefresh();
+        [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) {
+            if (!weakSelf) { [timer invalidate]; return; }
+            AKSpellWheelRefresh();
+        }];
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
             [self updateHaptics];
