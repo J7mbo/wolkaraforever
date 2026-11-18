@@ -219,16 +219,12 @@ static void TestPreferences(void) {
     // Templates and saved arrangements: the layout is data the user can keep and come back to.
     [layout reset];
     assert([AKGamepadLayout templateNames].count==3);
-    assert(!layout.wheelArea);   // no spell wheel by default
     [layout applyTemplateNamed:@"plain"];
-    assert(!layout.sticksOnly && !layout.floatingSticks && layout.keepFree.count==0 && !layout.wheelArea);
+    assert(!layout.sticksOnly && !layout.floatingSticks && layout.keepFree.count==0);
     [layout applyTemplateNamed:@"duo"];
-    assert(layout.sticksOnly && layout.floatingSticks && layout.keepFree.count==0 && !layout.wheelArea);
+    assert(layout.sticksOnly && layout.floatingSticks && layout.keepFree.count==0);
     [layout applyTemplateNamed:@"duo-addon"];
-    assert(layout.floatingSticks && layout.keepFree.count==2 && layout.wheelArea);   // the add-on's spell wheel
-    [layout applyTemplateNamed:@"duo"];
-    assert(!layout.wheelArea);
-    [layout applyTemplateNamed:@"duo-addon"];
+    assert(layout.floatingSticks && layout.keepFree.count==2);
     assert([layout saveAsProfileNamed:@"test-setup"]);
     assert([[layout savedProfileNames] containsObject:@"test-setup"]);
     [layout applyTemplateNamed:@"plain"];
@@ -246,7 +242,7 @@ static void TestPreferences(void) {
     // dictionary, and a newer version's unknown key does not erase it.
     layout.opacity=.55; layout.rearScale=1.4; layout.frontScale=.7; layout.hapticsEnabled=NO;
     layout.swapShoulders=NO; layout.performanceOverlayEnabled=YES; layout.sticksOnly=NO;
-    layout.floatingSticks=YES; layout.wheelArea=YES; [layout clearKeepFreeAreas];
+    layout.floatingSticks=YES; [layout clearKeepFreeAreas];
     [layout addKeepFreeAreaWithX:0.1 y:0.2 width:0.3 height:0.4];
     [layout moveItem:@"menu" toFrame:CGRectMake(10,20,44,44) inBounds:bounds];
     [layout save];
@@ -254,7 +250,6 @@ static void TestPreferences(void) {
     assert(fabs(relaunched.opacity-.55)<.001 && fabs(relaunched.rearScale-1.4)<.001 &&
            fabs(relaunched.frontScale-.7)<.001 && !relaunched.hapticsEnabled && !relaunched.swapShoulders &&
            relaunched.performanceOverlayEnabled && !relaunched.sticksOnly && relaunched.floatingSticks);
-    assert(relaunched.wheelArea);
     assert(relaunched.keepFree.count==1 && fabs(relaunched.keepFree[0][@"w"].doubleValue-0.3)<.001);
     assert(CGRectEqualToRect([relaunched frameForItem:@"menu" defaultFrame:frame inBounds:bounds],
                              [layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds]));
@@ -1195,23 +1190,42 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     };
     CGPoint beyondJump=fromCorner(0.25);
     assert([host hitTest:beyondJump withEvent:nil]==rightStick);
-    // A layout with the spell wheel on leaves its ring to the game - a tap there casts and a drag
-    // turns the wheel - out past the outermost spells; further out is the camera half again.
-    AKGamepadLayout *wheel=(id)[overlay valueForKey:@"preferences"];
-    wheel.wheelArea=YES;
+    // The spinning spell wheel's ring is the add-on's own: while its wheel is on, WolkaraRoue
+    // saves the ring (WolkaraRoueTouch, account-wide) and the newest saved file is published for
+    // the touch layer. That ring is the game's - a tap there casts and a drag turns the wheel -
+    // and just beyond it is the camera half again; there is no switch for it in the settings.
+    NSUserDefaults *standard=NSUserDefaults.standardUserDefaults;
+    [standard removeObjectForKey:AKSpellWheelDefaultsKey];
+    assert(!AKSpellWheelRingFromSavedVariables(@"WolkaraRoueTouch = {\n[\"version\"] = 1,\n[\"wheel\"] = false,\n}\n"));
+    assert(!AKSpellWheelRingFromSavedVariables(@"WolkaraRoueTouch = {\n[\"wheel\"] = true,\n[\"inner\"] = 0.17,\n[\"outer\"] = 3,\n}\n"));
+    assert(!AKSpellWheelRingFromSavedVariables(@"WolkaraRoueDB = {\n[\"wheel\"] = true,\n}\n"));
+    NSString *documents=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString *saved=[documents stringByAppendingPathComponent:@"World of Warcraft/_forever_/WTF/Account/TEST/SavedVariables"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:saved withIntermediateDirectories:YES attributes:nil error:NULL]);
+    NSString *file=[saved stringByAppendingPathComponent:@"WolkaraRoue.lua"];
+    assert([@"\nWolkaraRoueTouch = {\n[\"outer\"] = 0.355,\n[\"inner\"] = 0.17,\n[\"wheel\"] = true,\n[\"version\"] = 1,\n}\n"
+            writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    AKSpellWheelPublishFromDocuments(documents);
+    NSDictionary *ring=[standard dictionaryForKey:AKSpellWheelDefaultsKey];
+    assert(fabs([ring[@"inner"] doubleValue]-0.17)<.001 && fabs([ring[@"outer"] doubleValue]-0.355)<.001);
     assert([host hitTest:beyondJump withEvent:nil]==host);
-    assert([host hitTest:fromCorner(0.55) withEvent:nil]==host);
-    assert([host hitTest:fromCorner(0.64) withEvent:nil]==rightStick);
-    wheel.wheelArea=NO;
+    assert([host hitTest:fromCorner(0.33) withEvent:nil]==host);
+    assert([host hitTest:fromCorner(0.40) withEvent:nil]==rightStick);
+    // Back to the classic fan: the next save says so, and the corner is the sticks' again.
+    assert([@"WolkaraRoueTouch = {\n[\"wheel\"] = false,\n[\"version\"] = 1,\n}\n"
+            writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    [NSFileManager.defaultManager setAttributes:@{NSFileModificationDate:[NSDate dateWithTimeIntervalSinceNow:60]} ofItemAtPath:file error:NULL];
+    AKSpellWheelPublishFromDocuments(documents);
+    assert(![standard dictionaryForKey:AKSpellWheelDefaultsKey]);
     assert([host hitTest:beyondJump withEvent:nil]==rightStick);
-    // Its switch is in the settings panel, beside the floating switch, and says what it does.
+    // With no saved file at all nothing is changed.
+    [standard setObject:@{@"inner":@0.17,@"outer":@0.36} forKey:AKSpellWheelDefaultsKey];
+    AKSpellWheelPublishFromDocuments([documents stringByAppendingPathComponent:@"empty"]);
+    assert([standard dictionaryForKey:AKSpellWheelDefaultsKey]);
+    [standard removeObjectForKey:AKSpellWheelDefaultsKey];
+    [NSFileManager.defaultManager removeItemAtPath:documents error:NULL];
     [manager toggleSettings];
-    UISwitch *wheelSwitch=(id)Find(host,@"wolkaraforever.controls.wheelArea");
-    assert(wheelSwitch && !wheelSwitch.on && wheelSwitch.accessibilityHint.length);
-    wheelSwitch.on=YES; [wheelSwitch sendActionsForControlEvents:UIControlEventValueChanged];
-    assert([[AKGamepadLayout alloc] initWithDefaults:defaults].wheelArea);
-    wheelSwitch.on=NO; [wheelSwitch sendActionsForControlEvents:UIControlEventValueChanged];
-    assert(![[AKGamepadLayout alloc] initWithDefaults:defaults].wheelArea);
+    assert(!Find(host,@"wolkaraforever.controls.wheelArea"));
     [manager toggleSettings]; [host layoutIfNeeded];
     // Floating, the jump is the corner and its arc under the camera stick is not drawn.
     assert(jump.alpha==0);
@@ -1343,7 +1357,7 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     sticksOnly.on=NO; [sticksOnly sendActionsForControlEvents:UIControlEventValueChanged];
     [manager toggleSettings]; [host layoutIfNeeded];
     assert(jump.alpha==1);
-    puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump (its arc not drawn), the bottom centre (and the spell wheel's ring, when the layout has it on) is left to the game, a reserved area and the app's own buttons win over a half, a tap that stayed put is handed to the game and a held-then-moved stick drags in it, the touch that stops a run is neither, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
+    puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump (its arc not drawn), the bottom centre (and the spinning spell wheel's ring, as the add-on saved it) is left to the game, a reserved area and the app's own buttons win over a half, a tap that stayed put is handed to the game and a held-then-moved stick drags in it, the touch that stops a run is neither, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
 }
 // The sensitivity curve: full sensitivity is the stick as it is; lower values add a small dead
 // zone, soften small pushes and lower the top speed, keep the direction, and refuse nonsense.

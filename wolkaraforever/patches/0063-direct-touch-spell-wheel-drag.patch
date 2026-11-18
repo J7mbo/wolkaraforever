@@ -3,22 +3,24 @@
 # Why: an installed interface (WolkaraRoue's iPhone Duo layout) can put a spell wheel in a
 # ring around the screen's bottom-right corner. In combat the game lets an add-on move its
 # spell buttons only in answer to a click or a mouse wheel, never to a drag, so a finger could
-# not spin it in a fight. When the player's controller layout has the spell wheel switched on
-# (its wheelArea setting), a finger that comes down in that ring and moves is sent as wheel
+# not spin it in a fight. While the add-on's spinning wheel is on, it saves the ring its spells
+# take (WolkaraRoueTouch: inner and outer edge, shares of the height, following its Reach and
+# spell size); the touch controls publish that ring under WolkaraForeverSpellWheelV1, and a
+# finger that comes down in it and moves is sent as wheel
 # notches - one per 18 degrees of travel around the corner - with the pointer resting where
 # the finger came down, which is where the wheel listens. A flick keeps turning for a moment
 # after the finger lifts. A tap there is still a tap and a hold still a right click; only a
 # drag changes. Each notch ticks the phone's haptics unless the touch controls' Haptics
 # switch is off.
 #
-# Gated: direct touch in the mobile interface only, and only with the spell wheel on in the
-# controller layout (off by default; on in the "Duo with room for an add-on" starting point).
+# Gated: direct touch in the mobile interface only, and only while the add-on has saved a ring
+# (no ring without the spinning wheel, so no other interface or Fan style is affected).
 #
 # Applies to: translation/AppKit/AppKit.m (after 0055).
 # Upstream: no.
 #
 diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
-index 32095d0..a504399 100644
+index 5ae6ed0..52f806b 100644
 --- a/translation/AppKit/AppKit.m
 +++ b/translation/AppKit/AppKit.m
 @@ -317,6 +317,14 @@ static BOOL AKMobileInterface(void) {
@@ -44,20 +46,16 @@ index 32095d0..a504399 100644
      if (_pressedLeft) [self postMouse:NSEventTypeLeftMouseUp at:_last button:0];
      if (_pressedRight) [self postMouse:NSEventTypeRightMouseUp at:_last button:1];
  }
-@@ -737,6 +746,89 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -737,6 +746,90 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          [self postScrollNotch:direction];
      }
  }
-+// The spell wheel: a ring around the screen's bottom-right corner that the player's controller
-+// layout leaves to an installed interface's spell wheel (its wheelArea switch, off unless the
-+// layout turns it on). The game only lets an add-on turn such a wheel in combat from a click or
-+// a mouse wheel, so a finger dragged around that ring is sent as wheel notches - one per 18
-+// degrees - with the pointer resting where the finger came down, where the wheel listens. A
-+// tap there is still a tap.
++// The spell wheel: a ring around the screen's bottom-right corner where an installed
++// interface's spinning spell wheel puts its spells. The game only lets an add-on turn such a
++// wheel in combat from a click or a mouse wheel, so a finger dragged around that ring is sent as
++// wheel notches - one per 18 degrees - with the pointer resting where the finger came down,
++// where the wheel listens. A tap there is still a tap.
 +static const CGFloat AKWheelStep = 18;
-+// Of the view's height: from just beyond the jump to past the outermost spells at any of the
-+// wheel's own reach settings (the same ring floating sticks leave alone).
-+static const CGFloat AKWheelInner = 0.17, AKWheelOuter = 0.60;
 +static const CGFloat AKWheelFriction = 3.2, AKWheelCoastMin = 45, AKWheelFlick = 90;
 +static NSDictionary *AKWheelLayout(void) {
 +    NSDictionary *layout = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"WolkaraForeverTouchLayoutV1"];
@@ -73,10 +71,15 @@ index 32095d0..a504399 100644
 +static CGFloat AKWheelAngle(CGSize size, CGPoint point) {
 +    return atan2(size.height - point.y, size.width - point.x) * 180.0 / M_PI;
 +}
++// The ring is the add-on's own: WolkaraRoue saves its inner and outer edge (shares of the
++// height, following its Reach and spell size) only while its Fan style is the spinning wheel,
++// and the touch controls (TouchGamepad.m) publish what it saved under this key. No key, no ring.
 +static BOOL AKWheelRing(CGSize size, CGPoint point) {
-+    if (!AKWheelFlag(AKWheelLayout(), @"wheelArea", NO)) return NO;
++    NSDictionary *ring = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"WolkaraForeverSpellWheelV1"];
++    CGFloat inner = [ring[@"inner"] doubleValue], outer = [ring[@"outer"] doubleValue];
++    if (!(outer > inner) || size.height <= 0) return NO;
 +    CGFloat distance = hypot(size.width - point.x, size.height - point.y);
-+    return size.height > 0 && distance >= size.height * AKWheelInner && distance <= size.height * AKWheelOuter;
++    return distance >= size.height * inner && distance <= size.height * outer;
 +}
 +// Turn the angle travelled into notches. Turning towards the right edge brings the earlier
 +// spells back, which on the wheel is a notch up.
@@ -134,7 +137,7 @@ index 32095d0..a504399 100644
  - (BOOL)directGestureActive { return _directTouch != nil || _directMulti; }
  - (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
      if ([self handleTrackpadTouches:t event:ev]) return;
-@@ -747,6 +839,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -747,6 +840,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          _directTouch = t.anyObject;
          _last = [_directTouch locationInView:self];
          _directStart = _last; _directPending = YES; _directHeld = NO;
@@ -144,7 +147,7 @@ index 32095d0..a504399 100644
          // The pointer moves under the finger first, so the game knows what is there before
          // any button is pressed.
          [self postMouse:NSEventTypeMouseMoved at:_last button:0];
-@@ -769,8 +864,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -769,8 +865,14 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
      if ([self directGestureActive]) {
          if (_directMulti || ![t containsObject:_directTouch]) return;
          CGPoint point = [_directTouch locationInView:self];
@@ -159,7 +162,7 @@ index 32095d0..a504399 100644
              [self cancelDirectHold];
              BOOL turn = _directHeld;
              _directPending = NO; _directHeld = NO;
-@@ -798,7 +899,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -798,7 +900,9 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
          if (!_directMulti && [t containsObject:_directTouch]) {
              [self cancelDirectHold];
              CGPoint point = [_directTouch locationInView:self];
@@ -170,7 +173,7 @@ index 32095d0..a504399 100644
                  _directPending = NO;
                  [self postMouse:NSEventTypeLeftMouseDown at:_directStart button:0];
                  [self postMouse:NSEventTypeLeftMouseUp at:_directStart button:0];
-@@ -821,7 +924,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
+@@ -821,7 +925,7 @@ static BOOL AKIsFinger(NSSet<UITouch *> *t) { return t.anyObject.type == UITouch
      if ([self directGestureActive]) {
          // A cancelled gesture clicks nothing; whatever it held is let go.
          [self cancelDirectHold];

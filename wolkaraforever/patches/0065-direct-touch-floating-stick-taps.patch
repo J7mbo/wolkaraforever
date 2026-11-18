@@ -10,7 +10,7 @@
 # Upstream: no.
 #
 diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
-index c8857b4..5b9dda8 100644
+index 52f806b..aedf6f7 100644
 --- a/translation/AppKit/AppKit.m
 +++ b/translation/AppKit/AppKit.m
 @@ -337,6 +337,9 @@ static BOOL AKMobileInterface(void) {

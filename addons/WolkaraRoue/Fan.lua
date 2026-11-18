@@ -50,6 +50,10 @@ local count, most = COUNT, COUNT - SHOWN
 local JUMP = 0.16
 -- The fan switch: between the jump (out to JUMP) and the ring.
 local SWITCH_RADIUS, SWITCH_ANGLE = 0.20, 45
+-- The ring the app leaves to the wheel (FanSelect.lua saves it for the app), as shares of the
+-- height: from just inside the fan switch out to the spells' outer edge and the reach around
+-- them, so a thumb just beyond the spells is the camera stick again.
+local RING_INNER, RING_MARGIN = 0.17, 0.75
 
 local DEFAULTS = { enabled = true, size = 56, radius = 30, page = 1, seeded = false, style = "wheel" }
 local DUO_LAYOUT = 2
@@ -619,7 +623,7 @@ function Fan:Layout()
     if not root or InCombatLockdown() then return end
     local fan = Settings()
     -- The classic fan was chosen: it takes over once the interface reloads.
-    if not fan.enabled or not ns.DuoLayout() or ns.FanMode() ~= "spin" then root:Hide(); return end
+    if not fan.enabled or not ns.DuoLayout() or ns.FanMode() ~= "spin" then Fan.ring = nil; root:Hide(); return end
 
     local height = UIParent:GetHeight()
     local outer = height * fan.radius / 100
@@ -687,6 +691,7 @@ function Fan:Layout()
     flash:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", 0, 0)
     jump.label:Hide()
     root:Show()
+    Fan.ring = height > 0 and { inner = RING_INNER, outer = (outer + size * RING_MARGIN) / height } or nil
     Fan.Activate(fan.active)
 end
 
