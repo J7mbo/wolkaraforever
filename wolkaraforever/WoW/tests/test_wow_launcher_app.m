@@ -856,6 +856,13 @@ static void TestAddonHub(void) {
     [recommended loadViewIfNeeded];
     assert(recommended.tab == TKAddonHubTabMyAddOns);
     assert(Find(recommended.view, @"wow.addons.bundled") == nil || YES);
+    // The shipped WolkaraRoue package is offered in My Add-ons however the page was opened -
+    // the front page's recommendation row is no longer shown - except on the Mac-Ever page.
+    assert([[legacy valueForKey:@"offersBundledPackage"] boolValue]);
+    assert([[recommended valueForKey:@"offersBundledPackage"] boolValue]);
+    TKWoWAddonManagerViewController *macEver = [[TKWoWAddonManagerViewController alloc]
+        initWithAddOnsDirectory:addons edition:@"Forever" recommendation:TKAddonRecommendationMacEver];
+    assert(![[macEver valueForKey:@"offersBundledPackage"] boolValue]);
 
     [files removeItemAtPath:root error:NULL];
 }
