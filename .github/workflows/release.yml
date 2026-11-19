@@ -26,7 +26,7 @@ env:
 jobs:
   ipa:
     name: Unsigned .ipa
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v5
         with:
@@ -52,11 +52,11 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Use the newest Xcode (the app needs the iOS 27 SDK)
+      - name: Use Xcode 27 (the app needs the iOS 27 SDK)
         if: steps.plan.outputs.skip != 'true'
         run: |
           ls -d /Applications/Xcode*.app
-          newest=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          newest=$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)
           sudo xcode-select -s "$newest"
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
