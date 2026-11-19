@@ -1365,6 +1365,12 @@ static const unsigned short AKKeyF12 = 111;
         UIStackView *row = [[UIStackView alloc] initWithFrame:CGRectMake(0, 0, 320, 44)];
         row.distribution = UIStackViewDistributionFillEqually;
         row.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
+        // The keys stay inside the safe area: on an iPhone held sideways the row runs the
+        // whole width, and its first key (the saved-password key, when it shows) sat under
+        // the camera cut-out. The background still reaches the edges.
+        row.layoutMargins = UIEdgeInsetsZero;
+        row.insetsLayoutMarginsFromSafeArea = YES;
+        row.layoutMarginsRelativeArrangement = YES;
         NSArray<NSString *> *titles = @[@"Esc", @"Tab", @"←", @"→", @"⌫", @"↵", @"⌄"];
         for (NSUInteger i = 0; i < titles.count; i++) {
             UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
