@@ -67,8 +67,8 @@ jobs:
 
       - name: Build the unsigned .ipa
         if: steps.plan.outputs.skip != 'true'
-        # Published, so nothing exported from the runner's macOS goes in.
-        run: TOLKARA_SYSTEM_ROOTS=NO TOLKARA_BUNDLE_ID=local.wolkaraforever.yourname wolkaraforever/tools/package_ipa.sh "$PWD/$IPA"
+        # Personal build: the runner macOS public root certificates go in, which WoW Forever needs to log in.
+        run: TOLKARA_SYSTEM_ROOTS=YES TOLKARA_BUNDLE_ID=local.wolkaraforever.yourname wolkaraforever/tools/package_ipa.sh "$PWD/$IPA"
 
       - name: Write the release notes
         if: steps.plan.outputs.skip != 'true'
