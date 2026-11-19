@@ -52,6 +52,15 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Use the newest Xcode (the app needs the iOS 27 SDK)
+        if: steps.plan.outputs.skip != 'true'
+        run: |
+          ls -d /Applications/Xcode*.app
+          newest=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$newest"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
+
       - name: Install XcodeGen
         if: steps.plan.outputs.skip != 'true'
         run: brew install xcodegen
