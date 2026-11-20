@@ -12,6 +12,10 @@ WolkaraForever can run on an iPhone that meets the [installation requirements](I
 
 You can later return to **iPadOS**. The choice changes the interface only.
 
+With the WolkaraRoue interface, **Mobile UI → Combat → Fan style** chooses the corner fan: **Wheel** or **Pages** (the classic fan, two pages of ten with a button to flip), or **Spinning wheel** (up to four fans of up to fifteen spells, turned by dragging around them, in combat too). The spinning wheel tells the app where its spells are when the interface reloads (closing the settings reloads it), so after choosing it or changing **Reach**, the drag area follows from that reload; just beyond the spells the right stick works as usual. **General → Screen edges** keeps game windows clear of the Dynamic Island.
+
+In a password field, the yellow key on the keyboard's row can type a password you choose to save on the iPhone: it is kept in the Keychain behind Face ID or your passcode and never leaves the device. Hold the key to forget it.
+
 ## Plan storage, network, and controls
 
 Keep enough free storage for the game and updates. Use a reliable network for the first download. If a download stops, reopen the launcher and resume or repair it instead of deleting the app. The phone interface supports touch controls and can use a compatible physical keyboard or controller.
