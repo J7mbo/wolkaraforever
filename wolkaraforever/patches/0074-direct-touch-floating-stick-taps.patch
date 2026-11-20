@@ -1,0 +1,44 @@
+# WolkaraForever layer patch 0074 - mobile interface: a tap the floating sticks took reaches the game
+#
+# Why: floating sticks own every touch in their half of the screen, so a window's close
+# button, a bag slot or the game menu under a thumb could not be tapped. TouchGamepad.m now
+# hands a tap that stayed put (and only with the double-tap stick buttons off) to the game
+# with AKGamepadTapThroughNotification; the view the game draws in clicks there the way a
+# direct tap would - pointer to the spot, button down, button up.
+#
+# Applies to: translation/AppKit/AppKit.m (after 0055 and 0072).
+# Upstream: no.
+#
+diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
+index 164e082..2a1be58 100644
+--- a/translation/AppKit/AppKit.m
++++ b/translation/AppKit/AppKit.m
+@@ -337,6 +337,9 @@ static BOOL AKMobileInterface(void) {
+             _pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(directPinch:)];
+             _pinch.cancelsTouchesInView = NO; _pinch.delaysTouchesEnded = NO;
+             [self addGestureRecognizer:_pinch];
++            // A tap the floating sticks took but the game should have had (TouchGamepad.m).
++            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(gamepadTapThrough:)
++                                                       name:@"AKGamepadTapThroughNotification" object:nil];
+         } else {
+             self.multipleTouchEnabled = NO;
+         }
+@@ -693,6 +696,18 @@ static BOOL AKMobileInterface(void) {
+     [self moveHoverTo:point inside:CGRectContainsPoint(self.bounds,point)];
+ }
+ - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
++// Click where the floating stick was tapped, exactly as a direct tap there would have: the
++// pointer moves to it, then the button goes down and up.
++- (void)gamepadTapThrough:(NSNotification *)note {
++    NSNumber *x = note.userInfo[@"x"], *y = note.userInfo[@"y"];
++    if (![x isKindOfClass:NSNumber.class] || ![y isKindOfClass:NSNumber.class] || !self.window) return;
++    CGPoint point = [self convertPoint:CGPointMake(x.doubleValue, y.doubleValue) fromView:nil];
++    if (!CGRectContainsPoint(self.bounds, point)) return;
++    [self postMouse:NSEventTypeMouseMoved at:point button:0];
++    [self postMouse:NSEventTypeLeftMouseDown at:point button:0];
++    [self postMouse:NSEventTypeLeftMouseUp at:point button:0];
++    AKLog(@"direct touch: a floating-stick tap was handed to the game");
++}
+ static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSecondary) != 0; }
+ - (BOOL)handleTrackpadTouches:(NSSet<UITouch *> *)touches event:(UIEvent *)event {
+     if (!_touchControls.trackpadEnabled) return NO;

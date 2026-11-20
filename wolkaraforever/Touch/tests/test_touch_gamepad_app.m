@@ -1185,9 +1185,50 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     CGPoint nearCorner=[overlay convertPoint:CGPointMake(corner.x-0.05*h,corner.y-0.05*h) toView:host];
     assert([host hitTest:nearCorner withEvent:nil]==jump);
     // Nothing is reserved by default: the far corner beyond the jump is still the camera half.
-    CGFloat far=0.25*h;
-    CGPoint beyondJump=[overlay convertPoint:CGPointMake(corner.x-far*0.7071,corner.y-far*0.7071) toView:host];
+    CGPoint (^fromCorner)(CGFloat)=^CGPoint(CGFloat share) {
+        return [overlay convertPoint:CGPointMake(corner.x-share*h*0.7071,corner.y-share*h*0.7071) toView:host];
+    };
+    CGPoint beyondJump=fromCorner(0.25);
     assert([host hitTest:beyondJump withEvent:nil]==rightStick);
+    // The spinning spell wheel's ring is the add-on's own: while its wheel is on, WolkaraRoue
+    // saves the ring (WolkaraRoueTouch, account-wide) and the newest saved file is published for
+    // the touch layer. That ring is the game's - a tap there casts and a drag turns the wheel -
+    // and just beyond it is the camera half again; there is no switch for it in the settings.
+    NSUserDefaults *standard=NSUserDefaults.standardUserDefaults;
+    [standard removeObjectForKey:AKSpellWheelDefaultsKey];
+    assert(!AKSpellWheelRingFromSavedVariables(@"WolkaraRoueTouch = {\n[\"version\"] = 1,\n[\"wheel\"] = false,\n}\n"));
+    assert(!AKSpellWheelRingFromSavedVariables(@"WolkaraRoueTouch = {\n[\"wheel\"] = true,\n[\"inner\"] = 0.17,\n[\"outer\"] = 3,\n}\n"));
+    assert(!AKSpellWheelRingFromSavedVariables(@"WolkaraRoueDB = {\n[\"wheel\"] = true,\n}\n"));
+    NSString *documents=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString *saved=[documents stringByAppendingPathComponent:@"World of Warcraft/_forever_/WTF/Account/TEST/SavedVariables"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:saved withIntermediateDirectories:YES attributes:nil error:NULL]);
+    NSString *file=[saved stringByAppendingPathComponent:@"WolkaraRoue.lua"];
+    assert([@"\nWolkaraRoueTouch = {\n[\"outer\"] = 0.355,\n[\"inner\"] = 0.17,\n[\"wheel\"] = true,\n[\"version\"] = 1,\n}\n"
+            writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    AKSpellWheelPublishFromDocuments(documents);
+    NSDictionary *ring=[standard dictionaryForKey:AKSpellWheelDefaultsKey];
+    assert(fabs([ring[@"inner"] doubleValue]-0.17)<.001 && fabs([ring[@"outer"] doubleValue]-0.355)<.001);
+    assert([host hitTest:beyondJump withEvent:nil]==host);
+    assert([host hitTest:fromCorner(0.33) withEvent:nil]==host);
+    assert([host hitTest:fromCorner(0.40) withEvent:nil]==rightStick);
+    // Back to the classic fan: the next save says so, and the corner is the sticks' again.
+    assert([@"WolkaraRoueTouch = {\n[\"wheel\"] = false,\n[\"version\"] = 1,\n}\n"
+            writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    [NSFileManager.defaultManager setAttributes:@{NSFileModificationDate:[NSDate dateWithTimeIntervalSinceNow:60]} ofItemAtPath:file error:NULL];
+    AKSpellWheelPublishFromDocuments(documents);
+    assert(![standard dictionaryForKey:AKSpellWheelDefaultsKey]);
+    assert([host hitTest:beyondJump withEvent:nil]==rightStick);
+    // With no saved file at all nothing is changed.
+    [standard setObject:@{@"inner":@0.17,@"outer":@0.36} forKey:AKSpellWheelDefaultsKey];
+    AKSpellWheelPublishFromDocuments([documents stringByAppendingPathComponent:@"empty"]);
+    assert([standard dictionaryForKey:AKSpellWheelDefaultsKey]);
+    [standard removeObjectForKey:AKSpellWheelDefaultsKey];
+    [NSFileManager.defaultManager removeItemAtPath:documents error:NULL];
+    [manager toggleSettings];
+    assert(!Find(host,@"wolkaraforever.controls.wheelArea"));
+    [manager toggleSettings]; [host layoutIfNeeded];
+    // Floating, the jump is the corner and its arc under the camera stick is not drawn.
+    assert(jump.alpha==0);
     // The bottom centre belongs to neither thumb, so it is the game's - and an add-on's.
     assert([host hitTest:at(0.5,0.97) withEvent:nil]==host);
     // A reserved area is the player's own data, and it wins over a thumb's half.
@@ -1201,6 +1242,67 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     [prefs addKeepFreeAreaWithX:1.5 y:-2 width:0 height:0];
     assert(prefs.keepFree.count==0);
     assert([host hitTest:at(0.70,0.50) withEvent:nil]==rightStick);
+    // The app's own buttons beside the gamepad are answered before a thumb's half: a button
+    // under the overlay, in the left half, still gets its touch.
+    UIButton *own=[UIButton buttonWithType:UIButtonTypeSystem];
+    CGPoint ownAt=at(0.25,0.92);
+    own.frame=CGRectMake(ownAt.x-20,ownAt.y-20,40,40);
+    [host insertSubview:own belowSubview:overlay];
+    assert([host hitTest:ownAt withEvent:nil]==own);
+    [own removeFromSuperview];
+    assert([host hitTest:ownAt withEvent:nil]==leftStick);
+    // A tap that stayed put is handed to the game (with the double-tap stick buttons off); a
+    // drag is never a tap; a stick held still for a moment and then moved drags in the game,
+    // and lets go of the stick while it does.
+    BOOL stickButtons=prefs.stickButtonsEnabled;
+    prefs.stickButtonsEnabled=NO;
+    NSMutableArray<NSDictionary *> *taps=[NSMutableArray new];
+    NSMutableArray<NSString *> *drags=[NSMutableArray new];
+    id tapObserver=[NSNotificationCenter.defaultCenter addObserverForName:AKGamepadTapThroughNotification object:nil
+        queue:nil usingBlock:^(NSNotification *note) { [taps addObject:note.userInfo]; }];
+    id dragObserver=[NSNotificationCenter.defaultCenter addObserverForName:AKGamepadDragThroughNotification object:nil
+        queue:nil usingBlock:^(NSNotification *note) { [drags addObject:note.userInfo[@"phase"]]; }];
+    UIControl *camera=(id)rightStick;
+    CGPoint cameraMiddle=CGPointMake(CGRectGetMidX(camera.bounds),CGRectGetMidY(camera.bounds));
+    AKFixtureTouch *quick=[AKFixtureTouch new];
+    quick.point=cameraMiddle;
+    quick.when=300; [camera beginTrackingWithTouch:quick withEvent:nil];
+    quick.when=300.05; [camera endTrackingWithTouch:quick withEvent:nil];
+    assert(taps.count==1 && taps[0][@"x"] && taps[0][@"y"] && drags.count==0);
+    AKFixtureTouch *steer=[AKFixtureTouch new];
+    steer.point=cameraMiddle;
+    steer.when=301; [camera beginTrackingWithTouch:steer withEvent:nil];
+    steer.point=CGPointMake(cameraMiddle.x+40,cameraMiddle.y);
+    steer.when=301.05; [camera continueTrackingWithTouch:steer withEvent:nil];
+    steer.when=301.10; [camera endTrackingWithTouch:steer withEvent:nil];
+    assert(taps.count==1);
+    // Moving at once is steering: waiting past the hold afterwards changes nothing.
+    steer.point=cameraMiddle; steer.when=0;
+    [camera beginTrackingWithTouch:steer withEvent:nil];
+    steer.point=CGPointMake(cameraMiddle.x+40,cameraMiddle.y);
+    [camera continueTrackingWithTouch:steer withEvent:nil];
+    for (NSUInteger i=0; i<30; i++) Drain();
+    assert(drags.count==0);
+    [camera endTrackingWithTouch:steer withEvent:nil];
+    AKFixtureTouch *grab=[AKFixtureTouch new];
+    grab.point=cameraMiddle;
+    [camera beginTrackingWithTouch:grab withEvent:nil];
+    assert(WaitUntil(^BOOL{ return drags.count==1; }) && [drags[0] isEqual:@"began"]);
+    CGPoint let=[[rightStick valueForKey:@"position"] CGPointValue];
+    assert(fabs(let.x)<0.01 && fabs(let.y)<0.01);
+    grab.point=CGPointMake(cameraMiddle.x,cameraMiddle.y+60);
+    [camera continueTrackingWithTouch:grab withEvent:nil];
+    let=[[rightStick valueForKey:@"position"] CGPointValue];
+    assert(fabs(let.x)<0.01 && fabs(let.y)<0.01);          // dragging in the game, not steering
+    [camera endTrackingWithTouch:grab withEvent:nil];
+    assert(drags.count==3 && [drags[1] isEqual:@"moved"] && [drags[2] isEqual:@"ended"]);
+    assert(taps.count==1);
+    // With the double-tap stick buttons on, taps are theirs and nothing is handed on.
+    prefs.stickButtonsEnabled=YES;
+    quick.when=310; [camera beginTrackingWithTouch:quick withEvent:nil];
+    quick.when=310.05; [camera endTrackingWithTouch:quick withEvent:nil];
+    assert(taps.count==1);
+    prefs.stickButtonsEnabled=NO;
     // A stick held by one finger is not grabbed by another touch in its half.
     AKFixtureTouch *touch=[AKFixtureTouch new];
     touch.point=CGPointMake(CGRectGetMidX(leftStick.bounds),0);
@@ -1222,9 +1324,11 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     assert(held.y>0.9 && fabs(held.x)<0.01);
     // The next touch on the stick stops the run, and does not turn into a click on the game.
     touch.point=CGPointMake(CGRectGetMidX(leftStick.bounds),CGRectGetMidY(leftStick.bounds));
+    NSUInteger tapsBefore=taps.count;
     [stick beginTrackingWithTouch:touch withEvent:nil];
     assert(badge.hidden);
     [stick endTrackingWithTouch:touch withEvent:nil];
+    assert(taps.count==tapsBefore);
     CGPoint stopped=[[leftStick valueForKey:@"position"] CGPointValue];
     assert(fabs(stopped.x)<0.01 && fabs(stopped.y)<0.01);
     // Leaving the arrangement lets go of everything, including a run.
@@ -1235,6 +1339,9 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     [stick continueTrackingWithTouch:touch withEvent:nil];
     [stick endTrackingWithTouch:touch withEvent:nil];
     assert(!badge.hidden);
+    [NSNotificationCenter.defaultCenter removeObserver:tapObserver];
+    [NSNotificationCenter.defaultCenter removeObserver:dragObserver];
+    prefs.stickButtonsEnabled=stickButtons;
     mode(AKInterfaceModeIPadOS);
     [manager toggleSettings]; [host layoutIfNeeded];
     assert(badge.hidden);
@@ -1249,7 +1356,26 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     if (off.on) { off.on=NO; [off sendActionsForControlEvents:UIControlEventValueChanged]; }
     sticksOnly.on=NO; [sticksOnly sendActionsForControlEvents:UIControlEventValueChanged];
     [manager toggleSettings]; [host layoutIfNeeded];
-    puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump, the bottom centre is left to the game, a reserved area is the player's own and wins over a half, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
+    assert(jump.alpha==1);
+    puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump (its arc not drawn), the bottom centre (and the spinning spell wheel's ring, as the add-on saved it) is left to the game, a reserved area and the app's own buttons win over a half, a tap that stayed put is handed to the game and a held-then-moved stick drags in it, the touch that stops a run is neither, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
+}
+// The sensitivity curve: full sensitivity is the stick as it is; lower values add a small dead
+// zone, soften small pushes and lower the top speed, keep the direction, and refuse nonsense.
+static void TestStickShape(void) {
+    CGPoint half=CGPointMake(0.5,0), full=CGPointMake(1,0), diagonal=CGPointMake(0.6,0.6);
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(half,1),half));
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(diagonal,1),diagonal));
+    CGPoint soft=AKTouchGamepadShapeStick(half,0.3);
+    assert(soft.x>0 && soft.x<0.1 && soft.y==0);                    // a half push is gentle
+    assert(fabs(AKTouchGamepadShapeStick(full,0.3).x-0.545)<0.001);  // the top speed is lower
+    assert(AKTouchGamepadShapeStick(full,0.6).x>AKTouchGamepadShapeStick(full,0.3).x);
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(CGPointMake(0.05,0),0.3),CGPointZero));  // the dead zone
+    CGPoint bent=AKTouchGamepadShapeStick(diagonal,0.5);
+    assert(fabs(bent.x-bent.y)<0.0001 && bent.x>0);                 // the direction is kept
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(half,0.1),AKTouchGamepadShapeStick(half,0.3)));  // clamped to 0.3
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(CGPointMake(NAN,0),0.5),CGPointZero));
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(half,NAN),CGPointZero));
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(CGPointZero,0.5),CGPointZero));
 }
 static void TestStickMapping(void) {
     CGSize size=CGSizeMake(100,100);
@@ -1300,6 +1426,7 @@ static void TestTrackingPump(void) {
 static void TestLifecycle(UIView *host) {
     TestTrackingPump();
     TestStickMapping();
+    TestStickShape();
     TestHaptics();
     TestInterfaceMode();
     // The Touch Controller 2 fixtures that need no window: the log's boundary, the layout's

@@ -15,6 +15,78 @@
 #define AKGamepadLog(...) NSLog(@"[ak] %@", [NSString stringWithFormat:__VA_ARGS__])
 #endif
 
+#pragma mark - The spell wheel's ring, as the add-on saved it
+
+// WolkaraRoue's spinning wheel is drawn by the game, so only the add-on knows where its spells
+// are. It keeps the ring they need - the inner and outer edge, as shares of the screen height
+// from the bottom-right corner - in its account-wide saved variables (WolkaraRoueTouch), which
+// the game writes to WTF/Account/<account>/SavedVariables/WolkaraRoue.lua when the interface
+// reloads or the player logs out. So the ring follows the add-on's own Reach and spell size,
+// and is there only while its Fan style is the spinning wheel: nothing about it is set here.
+NSString *const AKSpellWheelDefaultsKey = @"WolkaraForeverSpellWheelV1";
+
+NSDictionary<NSString *, NSNumber *> *AKSpellWheelRingFromSavedVariables(NSString *text) {
+    NSRange start = [text rangeOfString:@"WolkaraRoueTouch = {"];
+    if (start.location == NSNotFound) return nil;
+    NSRange rest = NSMakeRange(NSMaxRange(start), text.length - NSMaxRange(start));
+    NSRange end = [text rangeOfString:@"}" options:0 range:rest];
+    if (end.location == NSNotFound) return nil;
+    NSString *table = [text substringWithRange:NSMakeRange(rest.location, end.location - rest.location)];
+    NSRegularExpression *field = [NSRegularExpression regularExpressionWithPattern:
+        @"\\[\"(wheel|inner|outer)\"\\]\\s*=\\s*([A-Za-z0-9.\\-]+)" options:0 error:NULL];
+    NSMutableDictionary<NSString *, NSString *> *values = [NSMutableDictionary new];
+    for (NSTextCheckingResult *match in [field matchesInString:table options:0 range:NSMakeRange(0, table.length)])
+        values[[table substringWithRange:[match rangeAtIndex:1]]] = [table substringWithRange:[match rangeAtIndex:2]];
+    if (![values[@"wheel"] isEqualToString:@"true"]) return nil;
+    double inner = values[@"inner"].doubleValue, outer = values[@"outer"].doubleValue;
+    // A hand-edited or damaged file cannot take the whole screen from the sticks.
+    if (!isfinite(inner) || !isfinite(outer) || inner < 0 || outer <= inner || outer > 1) return nil;
+    return @{@"inner": @(inner), @"outer": @(outer)};
+}
+
+void AKSpellWheelPublishFromDocuments(NSString *documents) {
+    static NSString *lastPath;
+    static NSDate *lastStamp;
+    NSFileManager *files = NSFileManager.defaultManager;
+    NSString *games = [documents stringByAppendingPathComponent:@"World of Warcraft"];
+    NSString *newest = nil;
+    NSDate *newestStamp = nil;
+    for (NSString *edition in [files contentsOfDirectoryAtPath:games error:NULL]) {
+        NSString *accounts = [games stringByAppendingPathComponent:[edition stringByAppendingPathComponent:@"WTF/Account"]];
+        for (NSString *account in [files contentsOfDirectoryAtPath:accounts error:NULL]) {
+            NSString *path = [accounts stringByAppendingPathComponent:
+                [account stringByAppendingPathComponent:@"SavedVariables/WolkaraRoue.lua"]];
+            NSDate *stamp = [files attributesOfItemAtPath:path error:NULL].fileModificationDate;
+            if (stamp && (!newestStamp || [stamp compare:newestStamp] == NSOrderedDescending)) {
+                newest = path; newestStamp = stamp;
+            }
+        }
+    }
+    if (!newest || ([newest isEqualToString:lastPath] && [newestStamp isEqualToDate:lastStamp])) return;
+    lastPath = newest; lastStamp = newestStamp;
+    NSData *data = [NSData dataWithContentsOfFile:newest];
+    if (data.length > 4 * 1024 * 1024) return;
+    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+        ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+    NSDictionary *ring = text ? AKSpellWheelRingFromSavedVariables(text) : nil;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (ring) [defaults setObject:ring forKey:AKSpellWheelDefaultsKey];
+    else [defaults removeObjectForKey:AKSpellWheelDefaultsKey];
+    AKGamepadLog(@"touch gamepad: spell wheel ring %@", ring
+        ? [NSString stringWithFormat:@"%.2f-%.2f of the height", [ring[@"inner"] doubleValue], [ring[@"outer"] doubleValue]]
+        : @"off");
+}
+
+// At most once a second: a stat of a few folders, and a read only when the add-on saved again.
+static void AKSpellWheelRefresh(void) {
+    static NSTimeInterval last;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (last > 0 && now - last < 1) return;
+    last = now;
+    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (documents) AKSpellWheelPublishFromDocuments(documents);
+}
+
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (!isfinite(point.x) || !isfinite(point.y) || !isfinite(size.width) || !isfinite(size.height) ||
         size.width <= 0 || size.height <= 0) return CGPointZero;
@@ -25,6 +97,21 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (length < 0.10) return CGPointZero;
     CGFloat scale = MIN(1,(length - 0.10) / 0.90) / length;
     return CGPointMake(x * scale,y * scale);
+}
+
+CGPoint AKTouchGamepadShapeStick(CGPoint position, CGFloat sensitivity) {
+    if (!isfinite(position.x) || !isfinite(position.y) || !isfinite(sensitivity)) return CGPointZero;
+    CGFloat s = MAX(0.3, MIN(1, sensitivity));
+    CGFloat length = hypot(position.x, position.y);
+    if (s >= 0.999 || length <= 0) return position;
+    CGFloat magnitude = MIN(1, length);
+    CGFloat deadZone = (1 - s) * 0.15;
+    if (magnitude <= deadZone) return CGPointZero;
+    CGFloat t = (magnitude - deadZone) / (1 - deadZone);
+    // Lower sensitivity both softens small pushes and lowers the top speed: at the lowest
+    // setting a stick pushed all the way gives a little over half.
+    CGFloat shaped = pow(t, 1 + (1 - s) * 2) * (0.35 + 0.65 * s);
+    return CGPointMake(position.x / length * shaped, position.y / length * shaped);
 }
 
 @interface AKGamepadButton : UIButton
@@ -87,6 +174,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)releaseInput { [self setPressed:NO]; }
 @end
 
+NSNotificationName const AKGamepadTapThroughNotification = @"AKGamepadTapThroughNotification";
+NSNotificationName const AKGamepadDragThroughNotification = @"AKGamepadDragThroughNotification";
+// A floating stick held still this long becomes a drag in the game: a scrollbar, the map, a
+// bag slot. A stick that moves before then is steering, as always.
+static const NSTimeInterval AKStickGrabHold = 0.45;
 @interface AKGamepadStick : UIControl
 @property(nonatomic, copy) NSString *element;
 @property(nonatomic, readonly) CGPoint position;
@@ -105,6 +197,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 // of a double tap. Nothing about movement changes: this is measured after the finger is gone,
 // and a tap that travelled is not reported at all.
 @property(nonatomic, copy, nullable) void (^tapRecognized)(NSTimeInterval time);
+// Where that tap landed, in window coordinates: read inside tapRecognized.
+@property(nonatomic, readonly) CGPoint tapWindowPoint;
 - (void)pollAutoRun:(NSTimeInterval)now;
 - (void)reset;
 @end
@@ -130,6 +224,29 @@ static const CGFloat AKAutoRunArm = 60;
     CGPoint _tapLast;
     CGFloat _tapTravel;
     BOOL _tapMoved;
+    // Hold-then-drag: whether this finger now drags in the game instead of steering, which
+    // pending hold it belongs to, and where it last was (window coordinates).
+    BOOL _grabbing;
+    NSUInteger _grabGeneration;
+    CGPoint _grabLast;
+}
+- (void)postGrab:(NSString *)phase at:(CGPoint)point {
+    _grabLast = point;
+    [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadDragThroughNotification object:self
+        userInfo:@{@"phase": phase, @"x": @(point.x), @"y": @(point.y)}];
+}
+// The finger stayed put for the whole hold: let go of the stick and press in the game there.
+- (void)beginGrabAt:(CGPoint)point {
+    _grabbing = YES;
+    [self setAutoStage:0];
+    [self updatePosition:CGPointZero];
+    if (_floating) self.superview.alpha = _idleAlpha > 0 ? _idleAlpha : 0.02;
+    [self postGrab:@"began" at:point];
+}
+- (void)endGrab {
+    if (!_grabbing) return;
+    _grabbing = NO;
+    [self postGrab:@"ended" at:_grabLast];
 }
 - (void)setAutoStage:(NSInteger)stage {
     if (_autoStage == stage) return;
@@ -188,6 +305,18 @@ static const CGFloat AKAutoRunArm = 60;
     _tapLast = [touch locationInView:self];
     _tapTravel = 0;
     _tapMoved = NO;
+    _grabbing = NO;
+    NSUInteger grab = ++_grabGeneration;
+    if (_floating) {
+        CGPoint start = [touch locationInView:nil];
+        __weak AKGamepadStick *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AKStickGrabHold * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            AKGamepadStick *stick = weakSelf;
+            if (!stick || stick->_grabGeneration != grab || !stick->_held || stick->_tapMoved || stick->_grabbing ||
+                !stick->_floating || stick->_autoRunning) return;
+            [stick beginGrabAt:start];
+        });
+    }
     if (_autoRunning) { _autoRunning = NO; [self setAutoStage:0]; }
     if (_floating && ring.superview) {
         ring.center = [touch locationInView:ring.superview];
@@ -197,6 +326,7 @@ static const CGFloat AKAutoRunArm = 60;
 }
 - (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)event;
+    if (_grabbing) { [self postGrab:@"moved" at:[touch locationInView:nil]]; return YES; }
     CGPoint point = [touch locationInView:self];
     _tapTravel += hypot(point.x - _tapLast.x, point.y - _tapLast.y);
     _tapLast = point;
@@ -209,6 +339,13 @@ static const CGFloat AKAutoRunArm = 60;
 }
 - (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)event;
+    _grabGeneration++;
+    if (_grabbing) {
+        if (touch) _grabLast = [touch locationInView:nil];
+        [self endGrab];
+        [self reset]; [self fadeOut];
+        return;
+    }
     _held = NO;
     BOOL tap = !_tapMoved && _tapTravel <= AKStickTapTravel && touch &&
         isfinite(touch.timestamp) && isfinite(_tapStarted) &&
@@ -221,14 +358,18 @@ static const CGFloat AKAutoRunArm = 60;
         [self fadeOut];
         return;
     }
+    _tapWindowPoint = touch ? [touch locationInView:nil] : CGPointZero;
+    // The touch that stopped an auto-run did its job by stopping it: it is not also a tap.
+    BOOL stoppedRun = _stoppedRun;
     [self reset]; [self fadeOut];
     // Reported after the reset, so the tap is judged against a stick that is already let go of:
     // a gesture never depends on the position the tap left behind.
-    if (tap && self.tapRecognized) self.tapRecognized(touch.timestamp);
-    if (_stoppedRun) { _stoppedRun = NO; return; }
+    if (tap && !stoppedRun && self.tapRecognized) self.tapRecognized(touch.timestamp);
 }
 - (void)cancelTrackingWithEvent:(UIEvent *)event {
     (void)event;
+    _grabGeneration++;
+    [self endGrab];
     _held = NO;
     _tapMoved = YES;   // cancelled is never a tap
     [self reset]; [self fadeOut];
@@ -237,6 +378,8 @@ static const CGFloat AKAutoRunArm = 60;
 - (void)reset {
     // Every reset is a release: the overlay resets on settings, on the keyboard and when the
     // controls hide, and a stick that kept _held would refuse the next finger.
+    _grabGeneration++;
+    [self endGrab];
     _held = NO; _autoRunning = NO; _forwardSince = 0; _stoppedRun = NO;
     [self setAutoStage:0];
     [self updatePosition:CGPointZero];
@@ -435,6 +578,20 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
 // from the camera.
 - (void)stickTapped:(AKGamepadStick *)stick at:(NSTimeInterval)time {
     NSTimeInterval *last = stick == _leftStick ? &_leftTap : &_rightTap;
+    // Floating sticks take every touch in their half, so a tap that stayed put is handed on to
+    // the game where it landed: a window's close button, a bag slot, the add-on's buttons. The
+    // stick had already answered the touch; the tap only clicks once the finger is gone, and
+    // only when it did not steer. Double-tap stick buttons need those taps, so with them on
+    // nothing is handed on.
+    if (self.floatingActive && !_preferences.stickButtonsEnabled) {
+        *last = 0;
+        CGPoint point = stick.tapWindowPoint;
+        [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadTapThroughNotification object:self
+            userInfo:@{@"x": @(point.x), @"y": @(point.y)}];
+        AKTouchControllerLog(AKTouchControllerEventGesture, @"tap-through",
+                             @{@"control": stick == _leftStick ? @"leftStick" : @"rightStick"});
+        return;
+    }
     BOOL wanted = _preferences.stickButtonsEnabled && !self.configuring && _controlsVisible;
     if (wanted && !self.stickButtonsAvailable) {
         *last = 0;
@@ -697,6 +854,9 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
     _leftStick.idleAlpha = _rightStick.idleAlpha = AKFloatIdleAlpha;
     if (floating && !_leftStick.held) _items[@"left"].alpha = AKFloatIdleAlpha;
     if (floating && !_rightStick.held) _items[@"right"].alpha = AKFloatIdleAlpha;
+    // Floating, the jump is the screen's corner (floatingHit), not the arc under the camera
+    // stick: that spot belongs to the stick, so the arc is not drawn there.
+    _jumpButton.alpha = floating ? 0 : 1;
     if (!floating) { _autoLock.hidden = YES; _autoBadge.hidden = YES; }
     [self setNeedsLayout];
 }
@@ -757,6 +917,17 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
 // everywhere else - including any area the player reserved - is not ours, so the touch goes on
 // to whatever is underneath. Nothing here forwards a touch by hand: returning nil is the app's
 // own hit-testing doing it.
+// Whether one of this app's own buttons - the toolbar's keyboard, the arrow that shows it, and
+// any other control beside the gamepad in the game's view - is under the point. Those are
+// answered before a stick: a thumb's half of the screen never swallows the app's own button.
+- (BOOL)hostControlAt:(CGPoint)point event:(UIEvent *)event {
+    for (UIView *sibling in self.superview.subviews.reverseObjectEnumerator) {
+        if (sibling == self || sibling.hidden || sibling.alpha < 0.01 || !sibling.userInteractionEnabled) continue;
+        UIView *hit = [sibling hitTest:[self convertPoint:point toView:sibling] withEvent:event];
+        if ([hit isKindOfClass:UIControl.class] && hit.alpha >= 0.01) return YES;
+    }
+    return NO;
+}
 - (UIView *)floatingHit:(CGPoint)point event:(UIEvent *)event {
     CGSize size = self.bounds.size;
     if (size.width <= 0 || size.height <= 0) return nil;
@@ -769,6 +940,7 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
         CGFloat aw = area[@"w"].doubleValue, ah = area[@"h"].doubleValue;
         if (fx >= ax && fx <= ax + aw && fy >= ay && fy <= ay + ah) return nil;
     }
+    if ([self hostControlAt:point event:event]) return nil;
     // An ability zone is the player's own surface and sits inside a thumb's half, so it is
     // answered before the halves are: a zone under the camera thumb is still the zone.
     for (AKGamepadButton *zone in _zoneButtons) {
@@ -780,6 +952,14 @@ static const CGFloat AKFloatRightMinX = 0.64, AKFloatRightMinY = 0.25, AKFloatRi
         AKGamepadButton *jump = _jumpButton;
         return jump.enabled ? jump : nil;
     }
+    // The spinning spell wheel, while the add-on has one on, belongs to the game: a tap there
+    // casts and a drag turns the wheel instead of growing the camera stick. Its ring is the one
+    // the add-on saved, so it is exactly as wide as the spells; the touch layer turns a drag in
+    // it into wheel notches.
+    AKSpellWheelRefresh();
+    NSDictionary *ring = [NSUserDefaults.standardUserDefaults dictionaryForKey:AKSpellWheelDefaultsKey];
+    CGFloat ringInner = [ring[@"inner"] doubleValue], ringOuter = [ring[@"outer"] doubleValue];
+    if (ringOuter > ringInner && corner >= ringInner * h && corner <= ringOuter * h) return nil;
     if (fx <= AKFloatLeftMaxX && (fy >= AKFloatLeftLowY || (fx >= AKFloatLeftMinX && fy >= AKFloatLeftMinY)))
         return [self stickHeld:_leftStick event:event] ? _sink : _leftStick;
     if (fx >= AKFloatRightMinX && fy >= AKFloatRightMinY && fy <= AKFloatRightMaxY)
@@ -1005,13 +1185,15 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     [stack addArrangedSubview:_settingsColumns];
     NSMutableArray *sliders = [NSMutableArray new], *values = [NSMutableArray new];
     NSArray *names = @[AKHostLocalized(@"touch.settings.transparency"), AKHostLocalized(@"touch.settings.shoulderSize"),
-                       AKHostLocalized(@"touch.settings.stickSize")];
-    CGFloat initial[] = {1-_preferences.opacity,_preferences.rearScale,_preferences.frontScale};
-    CGFloat min[] = {0,0.8,0.65}, max[] = {0.95,1.5,1.4};
-    for (NSUInteger i=0; i<3; i++) {
+                       AKHostLocalized(@"touch.settings.stickSize"), AKHostLocalized(@"touch.settings.moveSensitivity"),
+                       AKHostLocalized(@"touch.settings.cameraSensitivity")];
+    CGFloat initial[] = {1-_preferences.opacity,_preferences.rearScale,_preferences.frontScale,
+                         _preferences.moveSensitivity,_preferences.cameraSensitivity};
+    CGFloat min[] = {0,0.8,0.65,0.3,0.3}, max[] = {0.95,1.5,1.4,1,1};
+    for (NSUInteger i=0; i<5; i++) {
         UILabel *value = [self label:@""]; [values addObject:value]; [sizes addArrangedSubview:value];
         UISlider *slider = [UISlider new]; slider.tag = i; slider.minimumValue = min[i]; slider.maximumValue = max[i]; slider.value = initial[i];
-        slider.accessibilityLabel = names[i]; slider.accessibilityIdentifier = [@"wolkaraforever.controls." stringByAppendingString:@[@"transparency",@"rearScale",@"frontScale"][i]];
+        slider.accessibilityLabel = names[i]; slider.accessibilityIdentifier = [@"wolkaraforever.controls." stringByAppendingString:@[@"transparency",@"rearScale",@"frontScale",@"moveSensitivity",@"cameraSensitivity"][i]];
         [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
         [sliders addObject:slider]; [sizes addArrangedSubview:slider];
     }
@@ -1129,12 +1311,18 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
     _values[0].text = AKHostLocalizedFormat(@"touch.settings.transparency.value", (1-_preferences.opacity)*100);
     _values[1].text = AKHostLocalizedFormat(@"touch.settings.shoulderSize.value", _preferences.rearScale*100);
     _values[2].text = AKHostLocalizedFormat(@"touch.settings.stickSize.value", _preferences.frontScale*100);
+    if (_values.count > 4) {
+        _values[3].text = AKHostLocalizedFormat(@"touch.settings.moveSensitivity.value", _preferences.moveSensitivity*100);
+        _values[4].text = AKHostLocalizedFormat(@"touch.settings.cameraSensitivity.value", _preferences.cameraSensitivity*100);
+    }
     for (NSUInteger i=0; i<_sliders.count; i++) _sliders[i].accessibilityValue = _values[i].text;
 }
 - (void)sliderChanged:(UISlider *)slider {
     if (slider.tag == 0) _preferences.opacity = 1-slider.value;
     else if (slider.tag == 1) _preferences.rearScale = slider.value;
     else if (slider.tag == 2) _preferences.frontScale = slider.value;
+    else if (slider.tag == 3) _preferences.moveSensitivity = slider.value;
+    else if (slider.tag == 4) _preferences.cameraSensitivity = slider.value;
     [_preferences save]; [self updateValues]; [self updateAppearance];
 }
 - (void)swapShouldersChanged:(UISwitch *)sender {
@@ -1169,6 +1357,7 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
 - (void)resetLayout {
     [self reset]; [_preferences reset];
     _sliders[0].value = 1-_preferences.opacity; _sliders[1].value = _preferences.rearScale; _sliders[2].value = _preferences.frontScale;
+    if (_sliders.count > 4) { _sliders[3].value = _preferences.moveSensitivity; _sliders[4].value = _preferences.cameraSensitivity; }
     _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _overlaySwitch.on = _preferences.performanceOverlayEnabled;
     _sticksOnlySwitch.on = _preferences.sticksOnly; _floatingSwitch.on = _preferences.floatingSticks;
@@ -1218,6 +1407,13 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
         _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
         [host addSubview:_overlay];
         __weak AKTouchGamepad *weakSelf = self;
+        // The view the game draws in turns drags on the spell wheel whether or not the sticks
+        // float, so the ring is kept current here too, not only when a stick is touched.
+        AKSpellWheelRefresh();
+        [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) {
+            if (!weakSelf) { [timer invalidate]; return; }
+            AKSpellWheelRefresh();
+        }];
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
             [self updateHaptics];
@@ -1441,7 +1637,9 @@ static const CGFloat AKJumpReachOuter = 146, AKJumpReachInner = 50, AKJumpReachA
 - (void)stickChanged:(AKGamepadStick *)stick {
     if (_visible && !_overlay.configuring) {
         [_haptics stickMoved:stick.position left:stick == _overlay.leftStick];
-        [_virtualController setPosition:stick.position forDirectionPadElement:stick.element];
+        BOOL left = stick == _overlay.leftStick;
+        CGFloat sensitivity = left ? _overlay.preferences.moveSensitivity : _overlay.preferences.cameraSensitivity;
+        [_virtualController setPosition:AKTouchGamepadShapeStick(stick.position, sensitivity) forDirectionPadElement:stick.element];
     }
 }
 - (void)disconnectController {

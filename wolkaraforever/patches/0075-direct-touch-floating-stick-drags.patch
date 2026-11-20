@@ -1,0 +1,52 @@
+# WolkaraForever layer patch 0075 - mobile interface: a held floating stick drags in the game
+#
+# Why: floating sticks take every drag in their half of the screen, so a window's scrollbar,
+# the map or a bag slot could not be dragged. TouchGamepad.m now turns a stick that was held
+# still for a moment (AKStickGrabHold) into a drag in the game and reports it with
+# AKGamepadDragThroughNotification (began, moved, ended); the view the game draws in presses,
+# drags and lets go there the way a direct drag would. A stick that moves at once steers.
+#
+# Applies to: translation/AppKit/AppKit.m (after 0074).
+# Upstream: no.
+#
+diff --git a/translation/AppKit/AppKit.m b/translation/AppKit/AppKit.m
+index 2a1be58..d08f505 100644
+--- a/translation/AppKit/AppKit.m
++++ b/translation/AppKit/AppKit.m
+@@ -340,6 +340,9 @@ static BOOL AKMobileInterface(void) {
+             // A tap the floating sticks took but the game should have had (TouchGamepad.m).
+             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(gamepadTapThrough:)
+                                                        name:@"AKGamepadTapThroughNotification" object:nil];
++            // A floating stick held still and then dragged (TouchGamepad.m).
++            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(gamepadDragThrough:)
++                                                       name:@"AKGamepadDragThroughNotification" object:nil];
+         } else {
+             self.multipleTouchEnabled = NO;
+         }
+@@ -708,6 +711,26 @@ static BOOL AKMobileInterface(void) {
+     [self postMouse:NSEventTypeLeftMouseUp at:point button:0];
+     AKLog(@"direct touch: a floating-stick tap was handed to the game");
+ }
++// Press, drag and let go where a floating stick was held still: a scrollbar, the map, a bag
++// slot get a drag exactly as a direct drag there would give them.
++- (void)gamepadDragThrough:(NSNotification *)note {
++    NSString *phase = note.userInfo[@"phase"];
++    NSNumber *x = note.userInfo[@"x"], *y = note.userInfo[@"y"];
++    if (![phase isKindOfClass:NSString.class] || ![x isKindOfClass:NSNumber.class] ||
++        ![y isKindOfClass:NSNumber.class] || !self.window) return;
++    CGPoint point = [self convertPoint:CGPointMake(x.doubleValue, y.doubleValue) fromView:nil];
++    point.x = MAX(0, MIN(self.bounds.size.width, point.x));
++    point.y = MAX(0, MIN(self.bounds.size.height, point.y));
++    if ([phase isEqualToString:@"began"]) {
++        [self postMouse:NSEventTypeMouseMoved at:point button:0];
++        [self postMouse:NSEventTypeLeftMouseDown at:point button:0];
++        AKLog(@"direct touch: a held floating stick drags in the game");
++    } else if ([phase isEqualToString:@"moved"]) {
++        if (_pressedLeft) [self postMouse:NSEventTypeLeftMouseDragged at:point button:0];
++    } else if (_pressedLeft) {
++        [self postMouse:NSEventTypeLeftMouseUp at:point button:0];
++    }
++}
+ static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSecondary) != 0; }
+ - (BOOL)handleTrackpadTouches:(NSSet<UITouch *> *)touches event:(UIEvent *)event {
+     if (!_touchControls.trackpadEnabled) return NO;
