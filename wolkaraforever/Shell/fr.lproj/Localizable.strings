@@ -459,6 +459,10 @@
 "touch.settings.shoulderSize.value" = "Taille des gâchettes hautes · %.0f%%";
 "touch.settings.stickSize" = "Taille des sticks et boutons de façade";
 "touch.settings.stickSize.value" = "Taille des sticks et boutons de façade · %.0f%%";
+"touch.settings.moveSensitivity" = "Sensibilité du stick de déplacement";
+"touch.settings.moveSensitivity.value" = "Sensibilité du stick de déplacement · %.0f%%";
+"touch.settings.cameraSensitivity" = "Sensibilité du stick de caméra";
+"touch.settings.cameraSensitivity.value" = "Sensibilité du stick de caméra · %.0f%%";
 "touch.settings.outerTriggers" = "Gâchettes à l’extérieur";
 "touch.settings.outerTriggers.simple" = "La disposition simple n’a pas de gâchettes à déplacer.";
 "touch.settings.sticksOnly" = "Sticks et saut seulement (masquer les autres boutons)";
