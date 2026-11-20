@@ -2,7 +2,9 @@
 -- Fan.lua) and the quick bar (addons/WolkaraRoue/QuickBar.lua) - run outside the game. What is
 -- asserted: each one fills its own defaults, keeps every stored value inside the range the
 -- settings page offers, repairs a value a hand-edited save put outside it, and reports itself
--- on only when the Duo layout is the chosen interface. The quick bar also takes the free
+-- on only when the Duo layout is the chosen interface. The fan is a ring of up to fifteen
+-- spells with up to four fans (fan 1 always on, each with 5-15 spells); a save from the two
+-- pages of ten moves page 2's spells into slots 11-15 once. The quick bar also takes the free
 -- slots a save from before pages had.
 --
 -- usage: luajit test_mobile_addon_duo.lua <addons/WolkaraRoue>
@@ -48,22 +50,74 @@ local function Load(file)
     return modules
 end
 
+Load("FanClassic.lua")
 Load("Fan.lua")
-assert(ns.Fan, "Fan.lua registered no module")
+Load("FanSelect.lua")
+assert(ns.FanClassic and ns.FanSpin and ns.Fan, "the fans or their selector registered nothing")
+
+-- The classic fan is the default: two pages of ten, a turning wheel or pages.
+assert(ns.FanMode() == "classic", "the spinning wheel is the default")
 local fan = ns.Fan.Settings()
+assert(fan.enabled == true and fan.size == 56 and fan.radius == 30, "the fan's defaults are not what ships")
+assert(fan.page == 1 and fan.style == "wheel" and fan.duoLayout == 2)
+assert(fan.fans == nil, "the classic fan grew the spinning wheel's fans")
+assert(ns.Fan:Enabled() == true, "the fan is off in the Duo layout")
+ns.db.fan.page, ns.db.fan.offsets, ns.db.fan.style = 7, { 9, -3 }, "star"
+fan = ns.Fan.Settings()
+assert(fan.page == 1 and fan.offsets[1] == 5 and fan.offsets[2] == 0, "a classic value escaped its range")
+assert(fan.style == "pages", "an unknown classic style was kept")
+ns.db.fan.style = "wheel"
+
+-- The spinning wheel, chosen with Fan style.
+ns.db = {}
+ns.db.fan = { mode = "spin" }
+assert(ns.FanMode() == "spin")
+fan = ns.Fan.Settings()
 assert(fan.enabled == true and fan.size == 56 and fan.radius == 30, "the fan's defaults are not what ships")
 assert(fan.page == 1 and fan.style == "wheel" and fan.duoLayout == 2)
 assert(fan.offsets[1] == 0 and fan.offsets[2] == 0, "a fresh fan starts off-centre")
 assert(ns.Fan:Enabled() == true, "the fan is off in the Duo layout")
+-- Four fans: the first on with fifteen spells, the others off with ten, each with its own
+-- spells beside fan 1's (so a preset, which copies fan.pages, carries all of them).
+assert(ns.Fan.FANS == 4 and ns.Fan.MIN_COUNT == 5 and ns.Fan.COUNT == 15)
+assert(fan.fans[1].on == true and fan.fans[1].count == 15, "fan 1 is not the fifteen-spell ring")
+for index = 2, 4 do
+    assert(fan.fans[index].on == false and fan.fans[index].count == 10, "an extra fan is on, or not ten spells")
+    assert(type(fan.pages["fan" .. index]) == "table", "an extra fan has nowhere to keep its spells")
+end
+assert(fan.active == 1, "a fresh fan does not start on fan 1")
 -- A save a hand edit put outside the ranges the settings page offers is brought back inside.
-ns.db.fan.size, ns.db.fan.radius, ns.db.fan.page = 500, 1, 7
-ns.db.fan.offsets = { 9, -3 }
+ns.db.fan.size, ns.db.fan.radius = 500, 1
+ns.db.fan.offsets = { 99, -3, 4 }
+ns.db.fan.fans[1].on, ns.db.fan.fans[1].count = false, 40
+ns.db.fan.fans[2] = { on = true, count = 99 }
+ns.db.fan.fans[3] = { count = 1 }
+ns.db.fan.active = 9
 fan = ns.Fan.Settings()
 assert(fan.size == 80 and fan.radius == 22, "a stored fan size or radius escaped its range")
-assert(fan.page == 1, "a stored page outside the two pages was kept")
-assert(fan.offsets[1] == 5 and fan.offsets[2] == 0, "a stored offset escaped its range")
-ns.db.fan.style = "star"
-assert(ns.Fan.Settings().style == "pages", "an unknown fan style was kept")
+assert(fan.fans[1].on == true and fan.fans[1].count == 15, "fan 1 was switched off or outgrew fifteen")
+assert(fan.fans[2].on == true and fan.fans[2].count == 15, "fan 2's count escaped its range")
+assert(fan.fans[3].on == false and fan.fans[3].count == 5, "fan 3's count escaped its range")
+assert(fan.offsets[1] == 10 and fan.offsets[2] == 0 and fan.offsets[3] == 0, "a stored offset escaped its range")
+assert(fan.active == 1, "a stored fan outside the four was kept")
+-- The fan on screen being switched off falls back to fan 1.
+ns.db.fan.active = 2
+assert(ns.Fan.Settings().active == 2)
+ns.db.fan.fans[2].on = false
+assert(ns.Fan.Settings().active == 1, "a switched-off fan stayed on screen")
+-- The classic fan's style is the classic fan's: the spinning wheel leaves it alone.
+ns.db.fan.style = "pages"
+assert(ns.Fan.Settings().style == "pages", "the spinning wheel rewrote the classic fan's style")
+-- A save from the two pages of ten: page 2's first five spells fill the empty slots 11-15 once,
+-- a slot already filled is kept, and page 2 itself is left for an older build.
+ns.db.fan = { mode = "spin", pages = { { [12] = { kind = "spell", id = 99 } },
+    { { kind = "spell", id = 1 }, { kind = "spell", id = 2 }, { kind = "spell", id = 3 } } } }
+fan = ns.Fan.Settings()
+assert(fan.ring15 == true and fan.pages[1][11].id == 1 and fan.pages[1][12].id == 99 and fan.pages[1][13].id == 3,
+    "page 2 did not move into slots 11-15")
+assert(fan.pages[2][1].id == 1, "page 2 was deleted")
+fan.pages[1][11] = nil
+assert(ns.Fan.Settings().pages[1][11] == nil, "page 2 moved twice")
 ns.db.fan.enabled = false
 assert(ns.Fan:Enabled() == false, "a fan switched off still reports itself on")
 duo = false
@@ -81,6 +135,13 @@ assert(quick.open == true and quick.fiveSlots == true, "the quick bar's defaults
 ns.db.quick.count, ns.db.quick.size, ns.db.quick.page = 99, 1, 9
 quick = ns.Quick.Settings()
 assert(quick.count == 5 and quick.size == 36 and quick.page == 5, "a stored quick bar value escaped its range")
+-- From one circle to five, as the settings page offers.
+ns.db.quick.count = 0
+assert(ns.Quick.Settings().count == 1, "a quick bar with no circles was kept")
+ns.db.quick.count = 1
+assert(ns.Quick.Settings().count == 1, "a one-circle quick bar was not kept")
+-- Dragged in Customize, it keeps where it was put, and a save from before has it in place.
+assert(type(ns.Quick.Settings().offset) == "table", "the quick bar has nowhere to keep its position")
 -- A save from before the bar had pages: its slots become the first page, once.
 ns.db.quick = { enabled = true, entries = { { kind = "spell", id = 11 }, { kind = "spell", id = 12 } } }
 quick = ns.Quick.Settings()
@@ -94,4 +155,23 @@ ns.db.quick.enabled = true
 duo = false
 assert(ns.Quick:Enabled() == false, "the quick bar is on in the Standard interface")
 
-print("mobile add-on Duo arrangements: the fan and the quick bar fill their defaults, keep every stored value in range, repair a hand-edited one, take a pre-pages save once, and are on only in the Duo layout: PASS")
+-- The ring the app leaves to the spinning wheel is saved for it only while that wheel is on,
+-- as shares of the screen height that follow the wheel's own reach; otherwise wheel is false.
+local ring = modules["Spell wheel ring"]
+assert(ring and ring.Layout, "nothing saves the spell wheel's ring for the app")
+ns.db.fan = { mode = "classic" }
+ns.FanSpin.ring = { inner = 0.17, outer = 0.35 }
+ring:Layout()
+assert(WolkaraRoueTouch.wheel == false and WolkaraRoueTouch.outer == nil, "the classic fan claimed the spinning wheel's ring")
+ns.db.fan.mode = "spin"
+ring:Layout()
+assert(WolkaraRoueTouch.wheel == true and WolkaraRoueTouch.inner == 0.17 and WolkaraRoueTouch.outer == 0.35,
+    "the spinning wheel's ring was not saved for the app")
+ns.FanSpin.ring = { inner = 0.17, outer = 0.354999 }
+ring:Layout()
+assert(WolkaraRoueTouch.outer == 0.355, "the ring was saved with more digits than the app needs")
+ns.FanSpin.ring = nil
+ring:Layout()
+assert(WolkaraRoueTouch.wheel == false, "a wheel that is off still claims its ring")
+
+print("mobile add-on Duo arrangements: the classic fan by default (two pages of ten, wheel or pages) and the spinning wheel when chosen (four fans, 5-15 spells each, fan 1 always on, page 2 into slots 11-15 once) and the quick bar (1-5 circles, a kept position) fill their defaults, keep every stored value in range, repair a hand-edited one, take a pre-pages save once, and are on only in the Duo layout; the spinning wheel alone saves its ring for the app: PASS")

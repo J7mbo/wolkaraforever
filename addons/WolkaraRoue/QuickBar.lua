@@ -10,7 +10,8 @@ local EDGE = 6
 local TAB_W, TAB_H = 24, 52
 local GAP = 8
 
-local container, handle, pager
+local container, handle, pager, grip, outline
+local BeginBlockDrag, EndBlockDrag
 local holders, slots = {}, {}
 
 local DEFAULTS = { enabled = true, count = 5, size = 46, open = true, seeded = false, page = 1 }
@@ -30,9 +31,14 @@ local function Settings()
         if type(quick.pages[page]) ~= "table" then quick.pages[page] = {} end
     end
     quick.entries = nil
-    quick.count = ns.Clamp(math.floor(tonumber(quick.count) or 4), 3, MAX_SLOTS)
+    quick.count = ns.Clamp(math.floor(tonumber(quick.count) or 4), 1, MAX_SLOTS)
     quick.size = ns.Clamp(tonumber(quick.size) or 46, 36, 64)
     quick.page = ns.Clamp(math.floor(tonumber(quick.page) or 1), 1, PAGES)
+    -- Where the whole bar has been dragged to in Customize mode, in points from its default
+    -- place at the left edge. Kept on screen by the layout.
+    if type(quick.offset) ~= "table" then quick.offset = { x = 0, y = 0 } end
+    quick.offset.x = tonumber(quick.offset.x) or 0
+    quick.offset.y = tonumber(quick.offset.y) or 0
     if not quick.fiveSlots then
         quick.fiveSlots = true
         if quick.count == 4 then quick.count = 5 end
@@ -135,6 +141,66 @@ function Quick:Init()
         if ns.db and type(ns.db.quick) == "table" then ns.db.quick.open = open end
     end)
     handle:Hide()
+
+    -- Customize mode: a grip above the bar moves the whole block (tab, pager and slots) as one,
+    -- so it can be pulled out from under a camera cut-out such as the Dynamic Island. Not a
+    -- secure frame: it only changes the saved offset and lays the bar out again, out of combat.
+    grip = CreateFrame("Button", "WolkaraMobileQuickGrip", UIParent)
+    grip:SetFrameStrata("DIALOG")
+    ns.Box(grip, "BACKGROUND", 1, 0.82, 0.2, 0.35)
+    grip.label = ns.Label(grip, "GameFontNormalSmall", ns.T("Drag to move the left bar"))
+    grip.label:SetPoint("RIGHT", -10, 0)
+    grip:Hide()
+    local function CursorPoints()
+        local x, y = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        if not x or not scale or scale == 0 then return nil end
+        return x / scale, y / scale
+    end
+    -- One drag moves the whole block, whichever part of it the finger started on.
+    local dragging
+    BeginBlockDrag = function()
+        if InCombatLockdown() or not (ns.editing or ns.editMode) then return end
+        local x, y = CursorPoints()
+        if not x then return end
+        local offset = Settings().offset
+        dragging = { x = x, y = y, ox = offset.x, oy = offset.y }
+    end
+    EndBlockDrag = function()
+        if not dragging then return end
+        dragging = nil
+        if ns.MarkChanged then ns.MarkChanged() end
+    end
+    grip:SetScript("OnMouseDown", BeginBlockDrag)
+    grip:SetScript("OnMouseUp", EndBlockDrag)
+    local mover = CreateFrame("Frame")
+    mover:SetScript("OnUpdate", function()
+        if not dragging then return end
+        if InCombatLockdown() then dragging = nil; return end
+        -- A release the button never heard about (the finger lifted off it) still ends the drag.
+        if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then EndBlockDrag(); return end
+        local x, y = CursorPoints()
+        if not x then return end
+        local offset = Settings().offset
+        offset.x = dragging.ox + (x - dragging.x)
+        offset.y = dragging.oy - (y - dragging.y)
+        Quick:Layout()
+    end)
+    -- In Customize mode the circles themselves are the handle, as every other element is:
+    -- drag one and the bar follows; a tap still chooses its spell.
+    for page = 1, PAGES do
+        for _, button in ipairs(slots[page]) do
+            button:RegisterForDrag("LeftButton")
+            button:HookScript("OnDragStart", function() if ns.editing then BeginBlockDrag() end end)
+            button:HookScript("OnDragStop", EndBlockDrag)
+        end
+    end
+    outline = CreateFrame("Frame", nil, UIParent)
+    outline:SetFrameStrata("DIALOG")
+    outline:EnableMouse(false)
+    outline.glow = ns.EditFrame(outline)
+    outline.glow:Show()
+    outline:Hide()
 end
 
 local function HideLeft()
@@ -147,14 +213,22 @@ end
 function Quick:Layout()
     if not container or InCombatLockdown() then return end
     local quick = Settings()
-    if not quick.enabled or not ns.DuoLayout() then container:Hide(); handle:Hide(); return end
+    if not quick.enabled or not ns.DuoLayout() then container:Hide(); handle:Hide(); grip:Hide(); outline:Hide(); return end
 
-    local top = UIParent:GetHeight() * TOP
     local size = quick.size
     local pagerHeight = math.floor(size * 0.55)
-    local x = EDGE + TAB_W + 6
-    local first = top + pagerHeight + GAP
     local height = pagerHeight + GAP + quick.count * size + (quick.count - 1) * GAP
+    local screenW, screenH = UIParent:GetWidth(), UIParent:GetHeight()
+    local blockW = TAB_W + 6 + size
+    -- The saved offset, kept so the whole block (and the grip above it) stays on screen.
+    local offset = quick.offset
+    offset.x = ns.Clamp(offset.x, -EDGE, math.max(-EDGE, screenW - blockW - EDGE * 2))
+    local baseTop = screenH * TOP
+    offset.y = ns.Clamp(offset.y, 28 - baseTop, math.max(28 - baseTop, screenH - height - baseTop - 4))
+    local top = baseTop + offset.y
+    local left = EDGE + offset.x
+    local x = left + TAB_W + 6
+    local first = top + pagerHeight + GAP
 
     pager:ClearAllPoints()
     pager:SetSize(size, pagerHeight)
@@ -166,7 +240,19 @@ function Quick:Layout()
     handle:ClearAllPoints()
     handle:SetSize(TAB_W, TAB_H)
     handle:SetHitRectInsets(-6, -8, -10, -10)
-    handle:SetPoint("TOPLEFT", UIParent, "TOPLEFT", EDGE, -(top + (height - TAB_H) / 2))
+    handle:SetPoint("TOPLEFT", UIParent, "TOPLEFT", left, -(top + (height - TAB_H) / 2))
+
+    grip:ClearAllPoints()
+    -- Wide, and reaching well to the right: the bar's own left edge is where a camera cut-out
+    -- sits, so the part of the grip a finger can reach has to be beyond it.
+    grip:SetSize(math.max(blockW + 170, 220), 28)
+    grip:SetPoint("BOTTOMLEFT", UIParent, "TOPLEFT", left, -(top - 4))
+    -- The grip is for Customize: in Edit mode the spell picker opens over the left side.
+    grip:SetShown(ns.editing and true or false)
+    outline:ClearAllPoints()
+    outline:SetPoint("TOPLEFT", UIParent, "TOPLEFT", left - 2, -(top - 2))
+    outline:SetSize(blockW + 4, height + 4)
+    outline:SetShown(ns.editing and true or false)
 
     for page = 1, PAGES do
         for index, button in ipairs(slots[page]) do
@@ -205,7 +291,15 @@ function Quick:Refresh()
     end
 end
 
-function Quick:SetEditing() self:Refresh() end
+function Quick:SetEditing(on)
+    if grip then
+        grip.from = nil
+        local shown = on and container ~= nil and Settings().enabled and ns.DuoLayout() and true or false
+        grip:SetShown(shown)
+        if outline then outline:SetShown(shown) end
+    end
+    self:Refresh()
+end
 
 function Quick:CombatStarts()
     for page = 1, PAGES do
@@ -252,13 +346,15 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     local number = tonumber(value)
     if command == "on" then quick.enabled = true
     elseif command == "off" then quick.enabled = false
-    elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 3, MAX_SLOTS)
+    elseif command == "count" and number then quick.count = ns.Clamp(math.floor(number), 1, MAX_SLOTS)
     elseif command == "size" and number then quick.size = ns.Clamp(number, 36, 64)
+    elseif command == "reset" then quick.offset = { x = 0, y = 0 }
     else
-        ns.Print("/mobile quick on, off, count 3-5, size 36-64. Now: " .. (quick.enabled and "on" or "off")
+        ns.Print("/mobile quick on, off, count 1-5, size 36-64, reset (position). Now: " .. (quick.enabled and "on" or "off")
             .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
         return
     end
     ns.MarkChanged(); ns.Layout(); ns.Refresh()
-    ns.Print("quick bar " .. (quick.enabled and "on" or "off") .. ", " .. quick.count .. " slots per page, size " .. quick.size .. ".")
+    ns.Print("quick bar " .. (quick.enabled and "on" or "off") .. ", " .. quick.count .. " slots per page, size " .. quick.size
+        .. ", moved " .. math.floor(quick.offset.x + 0.5) .. " right, " .. math.floor(quick.offset.y + 0.5) .. " down.")
 end
