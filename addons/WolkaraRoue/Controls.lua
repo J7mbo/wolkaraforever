@@ -105,6 +105,10 @@ local function General(page)
     y = Row(page, y, ns.T("Windows"))
     Switch(page, X2, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().size == "large" end,
         function(v) if ns.Placement then ns.Placement.Settings().size = v and "large" or "fit" end end, ns.T("Large"), ns.T("Fit"), 150)
+    y = Row(page, y, ns.T("Screen edges"))
+    Stepper(page, X2, y + ROW_H, function() return ns.Placement and ns.Placement.Settings().edge or 7 end,
+        function(v) if ns.Placement then ns.Placement.Settings().edge = v end end, 1, 0, 15, ns.T("%"))
+    Text(page, ns.T("Keeps windows clear of the Dynamic Island."), X2 + 150, y + ROW_H - 8, "GameFontHighlightSmall")
     y = Row(page, y, ns.T("Positions"))
     Button(page, X2, y + ROW_H, ns.T("Customize"), 150, function() panel:Hide(); ns.SetEditing(true) end)
     Button(page, X3, y + ROW_H, ns.T("Reset positions"), 180, function()
@@ -126,12 +130,32 @@ local function Combat(page)
     Stepper(page, X2 + 100, y + ROW_H, function() return fan().size end, function(v) fan().size = v end, 4, 40, 80)
     y = Row(page, y, ns.T("Reach"))
     Stepper(page, X2, y + ROW_H, function() return fan().radius end, function(v) fan().radius = v end, 2, 22, 50, "%")
+    -- The spinning wheel's page-turn sound (the classic fan has no switch for it).
+    local sound = Switch(page, X2 + 150, y + ROW_H, function() return fan().sound ~= false end, function(v) fan().sound = v end,
+        ns.T("Sound"), ns.T("Silent"), 90)
+    updaters[#updaters + 1] = function() sound:SetShown(ns.FanMode() == "spin") end
+    -- Fan style: the classic fan as a turning wheel or as pages (two pages of ten, a button to
+    -- flip between them), or the spinning wheel (up to four fans of up to fifteen spells that
+    -- turn in combat too). A change of fan takes effect when the settings close and reload.
     y = Row(page, y, ns.T("Fan style"))
-    Switch(page, X2, y + ROW_H, function() return fan().style == "wheel" end,
-        function(v) fan().style = v and "wheel" or "pages" end, ns.T("Wheel"), ns.T("Pages"), 120)
+    local styleButton = Button(page, X2, y + ROW_H, "", 180, function()
+        if InCombatLockdown() then return Apply() end
+        local stored = fan()
+        if ns.FanMode() == "spin" then stored.mode, stored.style = "classic", "wheel"
+        elseif stored.style == "wheel" then stored.style = "pages"
+        else stored.mode = "spin" end
+        ns.MarkChanged("fan style")
+        Apply()
+    end)
+    local afterReload = Text(page, ns.T("Applies on Close."), X2 + 190, y + ROW_H - 8, "GameFontHighlightSmall")
+    updaters[#updaters + 1] = function()
+        local spin = ns.FanMode() == "spin"
+        styleButton.text:SetText(spin and ns.T("Spinning wheel") or (fan().style == "wheel" and ns.T("Wheel") or ns.T("Pages")))
+        afterReload:SetShown(ns.FanBuilt ~= nil and ns.FanBuilt ~= ns.FanMode())
+    end
     y = Row(page, y, ns.T("Quick bar"))
     Switch(page, X2, y + ROW_H, function() return quick().enabled end, function(v) quick().enabled = v end)
-    Stepper(page, X2 + 100, y + ROW_H, function() return quick().count end, function(v) quick().count = v end, 1, 3, 5)
+    Stepper(page, X2 + 100, y + ROW_H, function() return quick().count end, function(v) quick().count = v end, 1, 1, 5)
     y = Row(page, y, ns.T("Buffs"))
     Switch(page, X2, y + ROW_H, function() return ns.Status and ns.Status.Settings().buffs end,
         function(v) if ns.Status then ns.Status.Settings().buffs = v end end, ns.T("On bar"), ns.T("Game's"), 120)
@@ -172,6 +196,25 @@ local function Chat(page)
     y = Row(page, y, ns.T("Chat button"))
     Switch(page, X2, y + ROW_H, function() return ns.ChatTab and ns.ChatTab.Settings().enabled end,
         function(v) if ns.ChatTab then ns.ChatTab.Settings().enabled = v end end, ns.T("Button"), ns.T("Strip"), 120)
+end
+
+-- The iPhone Duo layout's fans: fan 1 is always there (the Skill fan switch on the Combat page
+-- turns the whole thing off); the others can be switched on, and each has its own number of
+-- spells. With more than one on, a button by the wheel switches between them.
+local function Fans(page)
+    local y = 0
+    Text(page, ns.T("Switch fans with the arrow between Jump and the fan."), X1, y, "GameFontHighlightSmall")
+    y = y - 28
+    local Fan = ns.FanSpin
+    for index = 1, Fan.FANS do
+        local function settings() return Fan.Settings().fans[index] end
+        y = Row(page, y, ns.T("Fan") .. " " .. index)
+        if index > 1 then
+            Switch(page, X2, y + ROW_H, function() return settings().on end, function(v) settings().on = v end, nil, nil, 70)
+        end
+        Stepper(page, X2 + 80, y + ROW_H, function() return settings().count end, function(v) settings().count = v end,
+            1, Fan.MIN_COUNT, Fan.COUNT)
+    end
 end
 
 local function Wheels(page)
@@ -219,7 +262,19 @@ local function Build()
     Combat(Page("combat", ns.T("Combat"), 2))
     Frames(Page("frames", ns.T("Frames"), 3))
     Chat(Page("chat", ns.T("Chat"), 4))
-    Wheels(Page("wheels", ns.T("Spell wheels"), 5))
+    -- One page for the wheels of whichever layout is on: the Duo layout's fans, or the
+    -- Standard layout's wheels and spell arcs. The other layout's settings stay out of sight.
+    local wheelsPage = Page("wheels", ns.T("Spell wheels"), 5)
+    local duoPane, standardPane = CreateFrame("Frame", nil, wheelsPage), CreateFrame("Frame", nil, wheelsPage)
+    duoPane:SetAllPoints(wheelsPage); standardPane:SetAllPoints(wheelsPage)
+    Fans(duoPane)
+    Wheels(standardPane)
+    updaters[#updaters + 1] = function()
+        local fans = ns.DuoLayout() and ns.FanMode() == "spin"
+        duoPane:SetShown(fans); standardPane:SetShown(not fans)
+        local nav = navButtons.wheels
+        if nav and nav.text then nav.text:SetText(fans and ns.T("Fans") or ns.T("Spell wheels")) end
+    end
 
     local credits = ns.Label(panel, "GameFontHighlightSmall", CREDITS)
     credits:SetPoint("BOTTOMLEFT", 24, 22)

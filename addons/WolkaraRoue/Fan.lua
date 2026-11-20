@@ -1,23 +1,59 @@
--- Corner skill fan (iPhone Duo layout).
+-- Corner skill wheel (iPhone Duo layout): the spinning wheel, chosen with Fan style; the
+-- classic fan (FanClassic.lua) is the fan otherwise.
+--
+-- A ring of up to fifteen spells around the bottom-right corner, five in view at a time, and up
+-- to four such fans with a button to switch between them. Drag a spell along the arc and the
+-- ring follows the finger; flick it and it keeps spinning, slows down and settles on a spell,
+-- with a bounce when it runs into either end. A tap without a drag casts the spell under the
+-- finger.
+--
+-- Out of combat the real spell buttons are moved every frame, so what is drawn is exactly what
+-- is tapped. In combat the game only lets secure code move spell buttons, and only in answer to
+-- a click or a mouse wheel: each wheel tick turns the ring by one spell (the app turns a drag
+-- on the ring into wheel ticks), and the switch is a secure click.
 local _, ns = ...
 
-local Fan = ns.Register("Corner fan", {})
-ns.Fan = Fan
+local Fan = ns.Register("Corner fan (spinning)", {})
+ns.FanSpin = Fan
 
-local PAGES, SHOWN, PER_PAGE = 2, 5, 10
+-- Up to FANS fans share the corner, one on screen at a time, each with its own spells and its
+-- own number of them (MIN_COUNT to COUNT). The switch button turns to the next fan that is on.
+local COUNT, SHOWN = 15, 5
+local FANS, MIN_COUNT = 4, 5
 local FIRST, LAST = 9, 81
+local STEP = (LAST - FIRST) / (SHOWN - 1)
 local TOP_RING = 13
-local TAB_ANGLE, PAGE_ANGLE = 58, 82
+local TAB_ANGLE = 58
 local SMALL = 0.72
 local REACH = 0.22
 local REACH_SMALL = 0.40
 local SWIPE = 0.35
 local HOLD = 3
+-- How far past either end the ring may be pulled, as a share of the finger's travel.
+local RUBBER = 0.35
+-- Slots per second lost to friction while coasting, as an exponential rate.
+local FRICTION = 3.2
+-- Below this speed (slots per second) a coast stops and settles on the nearest spell.
+local SETTLE_SPEED = 1.6
+-- The settling spring: stiff enough to be quick, under-damped enough to bounce once.
+local SPRING, DAMPING = 220, 15
+-- How far past the visible arc a spell is still drawn while it fades, in slots.
+local FADE = 0.6
 
-local root, tab, flip, jump, range, flash, setButton
+local root, tab, jump, flash, holder, switch
+local buttons = {}
+-- Every fan's secure ring and buttons; `holder` and `buttons` are the fan on screen.
+local holders, fanButtons = {}, {}
+local active = 1
+-- The fan on screen: how many spells it has, and the furthest it turns.
+local count, most = COUNT, COUNT - SHOWN
 local JUMP = 0.16
-local FLIP_RADIUS, FLIP_ANGLE = 0.20, 45
-local pages, buttons = {}, {}
+-- The fan switch: between the jump (out to JUMP) and the ring.
+local SWITCH_RADIUS, SWITCH_ANGLE = 0.20, 45
+-- The ring the app leaves to the wheel (FanSelect.lua saves it for the app), as shares of the
+-- height: from just inside the fan switch out to the spells' outer edge and the reach around
+-- them, so a thumb just beyond the spells is the camera stick again.
+local RING_INNER, RING_MARGIN = 0.17, 0.75
 
 local DEFAULTS = { enabled = true, size = 56, radius = 30, page = 1, seeded = false, style = "wheel" }
 local DUO_LAYOUT = 2
@@ -31,23 +67,55 @@ local function Settings()
     end
     if type(fan.pages) ~= "table" then fan.pages = {} end
     if type(fan.offsets) ~= "table" then fan.offsets = {} end
-    for page = 1, PAGES do
+    for page = 1, 2 do
         if type(fan.pages[page]) ~= "table" then fan.pages[page] = {} end
-        fan.offsets[page] = ns.Clamp(math.floor(tonumber(fan.offsets[page]) or 0), 0, PER_PAGE - SHOWN)
     end
+    -- The two pages of ten became one ring of fifteen: the second page's first five spells move
+    -- into the new slots 11-15 once, where those are still empty. Nothing is deleted, so an older
+    -- build still finds its second page.
+    if not fan.ring15 then
+        fan.ring15 = true
+        local ring, second = fan.pages[1], fan.pages[2]
+        for index = 1, COUNT - 10 do
+            if ring[10 + index] == nil and type(second[index]) == "table" then
+                local entry = {}
+                for key, value in pairs(second[index]) do entry[key] = value end
+                ring[10 + index] = entry
+            end
+        end
+    end
+    if type(fan.fans) ~= "table" then fan.fans = {} end
+    for index = 1, FANS do
+        local entry = fan.fans[index]
+        if type(entry) ~= "table" then entry = {}; fan.fans[index] = entry end
+        if entry.on == nil then entry.on = index == 1 end
+        entry.count = ns.Clamp(math.floor(tonumber(entry.count) or (index == 1 and COUNT or 10)), MIN_COUNT, COUNT)
+        -- Fan 1 is the fan: the Skill fan switch turns all of them off.
+        if index == 1 then entry.on = true end
+        -- Fan 1 keeps the spells it always had; the others live beside them, so a preset
+        -- (which copies fan.pages) carries every fan.
+        local key = index == 1 and 1 or ("fan" .. index)
+        if type(fan.pages[key]) ~= "table" then fan.pages[key] = {} end
+        fan.offsets[index] = ns.Clamp(math.floor(tonumber(fan.offsets[index]) or 0), 0,
+            math.max(0, entry.count - SHOWN))
+    end
+    fan.active = ns.Clamp(math.floor(tonumber(fan.active) or 1), 1, FANS)
+    if not fan.fans[fan.active].on then fan.active = 1 end
     if fan.duoLayout ~= DUO_LAYOUT then
         fan.duoLayout = DUO_LAYOUT
         fan.size, fan.radius = DEFAULTS.size, DEFAULTS.radius
     end
     fan.size = ns.Clamp(tonumber(fan.size) or 56, 40, 80)
     fan.radius = ns.Clamp(tonumber(fan.radius) or 30, 22, 50)
-    fan.page = (fan.page == 2) and 2 or 1
-    if not fan.wheelDefault then fan.wheelDefault = true; fan.style = "wheel" end
-    if fan.style ~= "wheel" then fan.style = "pages" end
     return fan
 end
 
 Fan.Settings = function() return Settings() end
+Fan.FANS, Fan.MIN_COUNT, Fan.COUNT = FANS, MIN_COUNT, COUNT
+local function Entries(index)
+    local fan = Settings()
+    return fan.pages[index == 1 and 1 or ("fan" .. index)]
+end
 
 function Fan:Enabled()
     return ns.DuoLayout() and type(ns.db.fan) == "table" and ns.db.fan.enabled == true
@@ -131,34 +199,19 @@ function ns.HoldToSwap(button, onHeld, slot)
     end)
 end
 
-local ANGLE = [=[
-    local x, y = owner:GetMousePosition()
-    local angle
-    if x then
-        local size = owner:GetAttribute("size")
-        local dx, dy = (1 - x) * size, y * size
-        if dx <= 0 then angle = 90
-        else
-            local t = dy / dx
-            local inverse = t > 1
-            if inverse then t = 1 / t end
-            local a = 45 * t + 15.64 * t * (1 - t)
-            if inverse then a = 90 - a end
-            angle = a
-        end
-    end
-]=]
+-- The secure side. In combat only this code may move the spell buttons, and it runs only in
+-- answer to a press, a click or a wheel tick. Each snippet works on the fan's own ring, the
+-- secure frame its buttons belong to (their owner).
 
+-- A press starts with no drag recorded.
 local DOWN = [=[
-    if not owner:GetAttribute("wheel") then return end
-    owner:SetAttribute("swiped", nil)
-]=] .. ANGLE .. [=[
-    owner:SetAttribute("downangle", angle)
+    owner:SetAttribute("dragmoved", nil)
 ]=]
 
-local FLIPSET = [=[
-    local offset = owner:GetAttribute("offset") > 0 and 0 or owner:GetAttribute("most")
-    owner:SetAttribute("offset", offset)
+-- Places every button for a whole-number offset: in view at its slot's precomputed position,
+-- hidden otherwise. Arithmetic and attribute reads only.
+local PLACE = [=[
+    local offset = owner:GetAttribute("offset")
     local shown = owner:GetAttribute("shown")
     for index = 1, owner:GetAttribute("count") do
         local button = owner:GetFrameRef("b" .. index)
@@ -173,26 +226,253 @@ local FLIPSET = [=[
     end
 ]=]
 
-local UP = [=[
-    if not owner:GetAttribute("wheel") then return end
-]=] .. ANGLE .. [=[
-    local from = owner:GetAttribute("downangle")
-    owner:SetAttribute("downangle", nil)
-    if not angle or not from then return end
-    local turns = (from - angle) / owner:GetAttribute("step")
-    if turns < ]=] .. SWIPE .. [=[ and turns > -]=] .. SWIPE .. [=[ then return end
-    owner:SetAttribute("swiped", true)
-]=] .. FLIPSET .. [=[
-]=]
-
+-- A click casts only after a tap: out of combat the insecure side marks a drag on the ring's
+-- secure frame as it happens, and that click is dropped. No other check, so a tap can never be
+-- swallowed.
 local CLICK = [=[
-    if owner:GetAttribute("swiped") then
-        owner:SetAttribute("swiped", nil)
+    if owner:GetAttribute("dragmoved") then
+        owner:SetAttribute("dragmoved", nil)
         return false
     end
 ]=]
 
+-- The scroll wheel: each tick turns the ring by one spell, scrolling down for the later ones.
+-- Like a click, a wheel tick is an event the game lets secure code answer in combat. The tick's
+-- size arrives as "offset" (or "delta", depending on the client); either is read.
+local WHEEL = [=[
+    local tick = delta or offset
+    if not tick or tick == 0 then return end
+    local pos = owner:GetAttribute("offset") or 0
+    local most = owner:GetAttribute("most")
+    if tick < 0 then pos = pos + 1 else pos = pos - 1 end
+    if pos < 0 then pos = 0 elseif pos > most then pos = most end
+    if pos == owner:GetAttribute("offset") then return end
+    owner:SetAttribute("offset", pos)
+]=] .. PLACE
+
+-- The switch button: the next fan that is on, in combat too. Only the fan rings are shown
+-- and hidden; each keeps its own turn.
+local SWITCH = [=[
+    local fans = self:GetAttribute("fans") or 1
+    local current = self:GetAttribute("active") or 1
+    local nextFan = current
+    for _ = 1, fans do
+        nextFan = nextFan % fans + 1
+        if self:GetAttribute("on" .. nextFan) then break end
+    end
+    self:SetAttribute("active", nextFan)
+    for index = 1, fans do
+        local ring = self:GetFrameRef("fan" .. index)
+        if ring then
+            if index == nextFan then ring:Show() else ring:Hide() end
+        end
+    end
+]=]
+
+-- ---------------------------------------------------------------------------------------
+-- Motion. `pos` is the ring's rotation in slots: 0 shows spells 1-5, `most` the last five, and a
+-- fraction is between two spells. Everything below is insecure and only draws.
+
+local geometry = { outer = 100, size = 56 }
+-- Out of combat, tell the secure click that the ring was dragged, so it does not cast.
+local function MarkDragged()
+    if not InCombatLockdown() and holder and not holder:GetAttribute("dragmoved") then
+        holder:SetAttribute("dragmoved", true)
+    end
+end
+local motion = { pos = 0, vel = 0, target = 0, mode = nil, samples = {} }
+
+local function Nearest(value)
+    return ns.Clamp(math.floor(value + 0.5), 0, most)
+end
+
+local function Rubber(raw)
+    if raw < 0 then return raw * RUBBER end
+    if raw > most then return most + (raw - most) * RUBBER end
+    return raw
+end
+
+-- Where spell `index` sits for a rotation, and how visible it is there (1 inside the arc,
+-- fading to 0 just beyond it).
+local function Spot(index, pos)
+    local angle = FIRST + (index - 1 - pos) * STEP
+    local fade = 1
+    if angle < FIRST then fade = 1 - (FIRST - angle) / (STEP * FADE)
+    elseif angle > LAST then fade = 1 - (angle - LAST) / (STEP * FADE) end
+    local x, y = Polar(geometry.outer, angle)
+    return x, y, math.max(0, math.min(1, fade))
+end
+
+local function BaseAlpha(button)
+    return (button:GetEntry() or ns.editing or ns.slotEditing) and 1 or 0.35
+end
+
+-- Draw the ring at `pos` by moving the real buttons. Out of combat only: in combat the secure
+-- code has placed them.
+local function Render(pos)
+    if not root then return end
+    local size = geometry.size
+    for index = 1, COUNT do
+        local x, y, fade = Spot(index, pos)
+        if index > count then fade = 0 end
+        local button = buttons[index]
+        if not InCombatLockdown() then
+            if fade > 0 then
+                button:ClearAllPoints()
+                button:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", x, y)
+                button:SetAlpha(BaseAlpha(button) * fade)
+                button:Show()
+            else
+                -- Hidden spells keep their full look: in combat the game shows them again
+                -- without this code, and a half-faded one would look greyed out.
+                button:SetAlpha(BaseAlpha(button))
+                button:Hide()
+            end
+        end
+    end
+end
+
+-- Out of combat, make the settled offset the secure one too, so the next swipe in combat starts
+-- from what is on screen.
+local function Commit(offset)
+    if InCombatLockdown() then return end
+    holder:SetAttribute("offset", offset)
+    motion.pos, motion.vel, motion.target = offset, 0, offset
+    Render(offset)
+    local db = ns.db and ns.db.fan
+    if type(db) == "table" and type(db.offsets) == "table" then db.offsets[active] = offset end
+end
+
+local function Finish()
+    local target = motion.target
+    local changed = target ~= motion.settledAt
+    motion.mode, motion.pos, motion.vel = nil, target, 0
+    Commit(target)
+    motion.settledAt = target
+    if changed then ns.FanFeedback() end
+end
+
+local function SpringTo(target)
+    motion.target, motion.mode = target, "spring"
+end
+
+-- After a wheel tick: out of combat glide from where the ring was to where the secure side put
+-- it; in combat the secure side has already placed the buttons, so only the state follows.
+function Fan.Wheeled()
+    local offset = holder:GetAttribute("offset") or 0
+    if offset == motion.settledAt and offset == motion.target then return end
+    if InCombatLockdown() then
+        motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
+        local db = ns.db and ns.db.fan
+        if type(db) == "table" and type(db.offsets) == "table" then db.offsets[active] = offset end
+        ns.FanFeedback()
+    else
+        motion.vel = 0
+        SpringTo(offset)
+    end
+end
+
+local function Sample(raw)
+    local now = GetTime()
+    local samples = motion.samples
+    samples[#samples + 1] = { now, raw }
+    while #samples > 2 and now - samples[1][1] > 0.12 do table.remove(samples, 1) end
+end
+
+-- Slots per second over the last tenth of a second of the drag; nothing if the finger had
+-- stopped before it lifted.
+local function Velocity()
+    local samples = motion.samples
+    local last, first = samples[#samples], samples[1]
+    if not last or not first or last == first then return 0 end
+    local span = last[1] - first[1]
+    if span <= 0 or GetTime() - last[1] > 0.08 then return 0 end
+    return (last[2] - first[2]) / span
+end
+
+local function Step(dt)
+    if motion.mode == "coast" then
+        motion.pos = motion.pos + motion.vel * dt
+        motion.vel = motion.vel * math.exp(-FRICTION * dt)
+        if motion.pos < 0 then
+            SpringTo(0); ns.FanBump()
+        elseif motion.pos > most then
+            SpringTo(most); ns.FanBump()
+        elseif math.abs(motion.vel) < SETTLE_SPEED then
+            SpringTo(Nearest(motion.pos))
+        end
+    elseif motion.mode == "spring" then
+        local accel = -SPRING * (motion.pos - motion.target) - DAMPING * motion.vel
+        motion.vel = motion.vel + accel * dt
+        motion.pos = motion.pos + motion.vel * dt
+        if math.abs(motion.pos - motion.target) < 0.004 and math.abs(motion.vel) < 0.05 then Finish() end
+    end
+end
+
+local driver = CreateFrame("Frame")
+driver:SetScript("OnUpdate", function(_, elapsed)
+    if not motion.mode or not root or not root:IsShown() then return end
+    if motion.mode == "drag" then
+        local angle = ns.FanCursorAngle()
+        if angle and motion.downAngle then
+            local raw = motion.startPos + (motion.downAngle - angle) / STEP
+            motion.raw = raw
+            Sample(raw)
+            motion.pos = Rubber(raw)
+            if math.abs(raw - motion.startPos) >= SWIPE then MarkDragged() end
+        end
+    else
+        local left = math.min(elapsed, 1 / 20)
+        while left > 0 and motion.mode and motion.mode ~= "drag" do
+            local dt = math.min(left, 1 / 240)
+            Step(dt)
+            left = left - dt
+        end
+    end
+    Render(motion.pos)
+end)
+
+local function PressStarted()
+    -- In combat the spells stay where the secure code put them and nothing is drawn over them:
+    -- what is on screen is always what a tap casts. Wheel ticks turn the ring there.
+    if InCombatLockdown() then motion.mode = nil; return end
+    motion.startPos = motion.mode and motion.pos or (holder:GetAttribute("offset") or 0)
+    motion.downAngle = ns.FanCursorAngle()
+    motion.raw = motion.startPos
+    motion.vel = 0
+    wipe(motion.samples)
+    motion.mode = "drag"
+end
+
+local function PressEnded()
+    if motion.mode ~= "drag" then return end
+    local raw = motion.raw or motion.startPos
+    local moved = math.abs(raw - motion.startPos) >= SWIPE
+    motion.vel = 0
+    if not moved then
+        SpringTo(Nearest(motion.startPos))
+    else
+        local speed = Velocity()
+        if math.abs(speed) > SETTLE_SPEED then
+            motion.vel, motion.mode = speed, "coast"
+            if motion.pos < 0 or motion.pos > most then SpringTo(Nearest(motion.pos)) end
+        else
+            SpringTo(Nearest(raw))
+        end
+    end
+end
+
+-- Combat starts while the ring is still moving on its own: settle it now, while the game still
+-- allows its buttons to be placed.
+ns.On("PLAYER_REGEN_DISABLED", function()
+    if not holder or not motion.mode then return end
+    motion.target = motion.mode == "drag" and Nearest(motion.raw or motion.pos) or Nearest(motion.target or motion.pos)
+    Finish()
+end)
+
 function Fan:Init()
+    if ns.FanMode() ~= "spin" then return end
+    ns.FanBuilt = "spin"
     ns.DuoLayout()
     local fan = Settings()
     Seed(fan)
@@ -202,49 +482,52 @@ function Fan:Init()
     root:SetFrameStrata("LOW")
     root:Hide()
 
-    for page = 1, PAGES do
-        local holder = CreateFrame("Frame", "WolkaraMobileFanPage" .. page, root, "SecureHandlerBaseTemplate")
-        holder:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT")
-        holder:SetSize(2, 2)
-        holder:EnableMouse(false)
-        pages[page] = holder
-        buttons[page] = {}
-        for index = 1, PER_PAGE do
-            local button = ns.CreateActionButton("WolkaraMobileFan" .. page .. "Skill" .. index, holder, fan.size,
-                function() return Settings().pages[page][index] end,
-                function(entry) Settings().pages[page][index] = entry end)
-            SecureHandlerWrapScript(button, "OnMouseDown", holder, DOWN)
-            SecureHandlerWrapScript(button, "OnMouseUp", holder, UP)
-            SecureHandlerWrapScript(button, "OnClick", holder, CLICK)
-            button:HookScript("OnMouseDown", function()
-                button.downOffset = holder:GetAttribute("offset")
-                button.downAngle = ns.FanCursorAngle()
-                if ns.fanDebug then
-                    ns.Print(("fan down: wheel=%s secure angle=%s cursor angle=%s"):format(tostring(holder:GetAttribute("wheel")),
-                        tostring(holder:GetAttribute("downangle")), tostring(button.downAngle)))
-                end
-            end)
-            button:HookScript("OnMouseUp", function()
-                local from, to = button.downAngle, ns.FanCursorAngle()
-                button.downAngle = nil
-                if ns.fanDebug then
-                    ns.Print(("fan up: secure swiped=%s offset=%s cursor angle %s -> %s"):format(tostring(holder:GetAttribute("swiped")),
-                        tostring(holder:GetAttribute("offset")), tostring(from), tostring(to)))
-                end
-                if not InCombatLockdown() and holder:GetAttribute("wheel") and not holder:GetAttribute("swiped") and from and to then
-                    ns.FanTurn(page, (from - to) / (holder:GetAttribute("step") or 18))
-                end
-                if holder:GetAttribute("offset") ~= button.downOffset then ns.FanFeedback(); ns.FanArrow() end
-                if InCombatLockdown() then return end
-                local db = ns.db and ns.db.fan
-                if type(db) == "table" and type(db.offsets) == "table" then
-                    db.offsets[page] = holder:GetAttribute("offset") or 0
-                end
-            end)
-            holder:SetFrameRef("b" .. index, button)
-            buttons[page][index] = button
+    for fanIndex = 1, FANS do
+        local ring = CreateFrame("Frame", "WolkaraMobileFanPage" .. fanIndex, root, "SecureHandlerBaseTemplate")
+        ring:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT")
+        ring:SetSize(2, 2)
+        ring:EnableMouse(false)
+        ring:Hide()
+        holders[fanIndex] = ring
+        fanButtons[fanIndex] = {}
+        for index = 1, COUNT do
+            local button = ns.CreateActionButton("WolkaraMobileFan" .. fanIndex .. "Skill" .. index, ring, fan.size,
+                function() return Entries(fanIndex)[index] end,
+                function(entry) Entries(fanIndex)[index] = entry end)
+            SecureHandlerWrapScript(button, "OnMouseDown", ring, DOWN)
+            SecureHandlerWrapScript(button, "OnClick", ring, CLICK)
+            button:EnableMouseWheel(true)
+            SecureHandlerWrapScript(button, "OnMouseWheel", ring, WHEEL)
+            button:HookScript("OnMouseWheel", function() Fan.Wheeled() end)
+            button:HookScript("OnMouseDown", PressStarted)
+            button:HookScript("OnMouseUp", PressEnded)
+            ring:SetFrameRef("b" .. index, button)
+            fanButtons[fanIndex][index] = button
         end
     end
+    holder, buttons = holders[1], fanButtons[1]
+
+    -- The switch: shown when more than one fan is on.
+    -- The switch: the small arrow button between the jump and the fan, where the old page
+    -- button was, shown when more than one fan is on.
+    switch = CreateFrame("Button", "WolkaraMobileFanSwitch", root, "SecureHandlerClickTemplate")
+    switch:RegisterForClicks("AnyUp")
+    for fanIndex = 1, FANS do switch:SetFrameRef("fan" .. fanIndex, holders[fanIndex]) end
+    switch:SetAttribute("fans", FANS)
+    switch:SetAttribute("active", 1)
+    switch:SetAttribute("_onclick", SWITCH)
+    ns.Disc(switch, "BACKGROUND", 0.05, 0.05, 0.08, 0.75, 0)
+    switch.arrow = switch:CreateTexture(nil, "ARTWORK")
+    switch.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+    switch.arrow:SetPoint("CENTER")
+    switch.arrow:SetRotation(math.rad(135))
+    local switchHighlight = ns.Disc(switch, "HIGHLIGHT", 1, 1, 1, 0.18, 0)
+    switchHighlight:SetBlendMode("ADD")
+    switch:HookScript("OnClick", function(self)
+        Fan.Activate(self:GetAttribute("active") or 1)
+        ns.FanFeedback()
+    end)
+    Fan.switch = switch
 
     jump = CreateFrame("Frame", "WolkaraMobileJumpArt", root)
     jump:EnableMouse(false)
@@ -269,9 +552,6 @@ function Fan:Init()
     rise:SetFromAlpha(0); rise:SetToAlpha(0.28); rise:SetDuration(0.07); rise:SetOrder(1)
     local fall = flash.anim:CreateAnimation("Alpha")
     fall:SetFromAlpha(0.28); fall:SetToAlpha(0); fall:SetDuration(0.25); fall:SetOrder(2)
-    range = ns.Label(root, "GameFontNormalSmall")
-    range:SetTextColor(1, 0.82, 0.3)
-
     tab = BuildSmall("WolkaraMobileFanTab", "SecureActionButtonTemplate")
     tab:RegisterForClicks("AnyUp", "AnyDown")
     tab:SetAttribute("useOnKeyDown", true)
@@ -280,62 +560,44 @@ function Fan:Init()
     tab.icon:SetTexture(Icon("Interface\\Icons\\Ability_Hunter_SniperTraining", "Interface\\Icons\\Ability_Hunter_SniperShot"))
     tab.icon:SetAlpha(0.55)
     tab.label:SetText("Tab")
+end
 
-    flip = BuildSmall("WolkaraMobileFanFlip", "SecureHandlerClickTemplate")
-    flip:RegisterForClicks("AnyUp")
-    for page = 1, PAGES do flip:SetFrameRef("page" .. page, pages[page]) end
-    flip:SetAttribute("_onclick", [=[
-        if self:GetAttribute("held") then self:SetAttribute("held", nil); return end
-        local page = self:GetAttribute("page") == 1 and 2 or 1
-        self:SetAttribute("page", page)
-        local one, two = self:GetFrameRef("page1"), self:GetFrameRef("page2")
-        if page == 1 then one:Show(); two:Hide() else one:Hide(); two:Show() end
-    ]=])
-    flip.icon:SetTexture("Interface\\Icons\\INV_Misc_Note_04")
-    flip.icon:SetAlpha(0.45)
-    flip:HookScript("OnClick", function(self)
-        local page = self:GetAttribute("page") == 2 and 2 or 1
-        self.label:SetText(page .. "/" .. PAGES)
-        if ns.db and type(ns.db.fan) == "table" then ns.db.fan.page = page end
-    end)
-
-    setButton = CreateFrame("Button", "WolkaraMobileFanSet", root, "SecureHandlerClickTemplate")
-    setButton:RegisterForClicks("AnyDown")
-    setButton:SetFrameRef("flip", flip)
-    for page = 1, PAGES do setButton:SetFrameRef("page" .. page, pages[page]) end
-    setButton:SetAttribute("_onclick", [=[
-        local flip = self:GetFrameRef("flip")
-        local owner = self:GetFrameRef(flip:GetAttribute("page") == 2 and "page2" or "page1")
-        if not owner:GetAttribute("wheel") then return end
-]=] .. FLIPSET)
-    setButton.arrow = setButton:CreateTexture(nil, "ARTWORK")
-    setButton.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
-    setButton.arrow:SetPoint("CENTER")
-    local glow = ns.Disc(setButton, "HIGHLIGHT", 1, 1, 1, 0.18, 0)
-    glow:SetBlendMode("ADD")
-    setButton:HookScript("OnClick", function() ns.FanFeedback(); ns.FanArrow() end)
-    flip:HookScript("OnClick", function() ns.FanArrow() end)
-
+-- The fan on screen changed (the switch, in or out of combat, or a layout): point the drawing
+-- code at its ring and buttons. Out of combat this also shows that ring and hides the others;
+-- in combat the switch's secure code already has.
+function Fan.Activate(index)
+    if not holders[index] then index = 1 end
+    active = index
+    holder, buttons = holders[index], fanButtons[index]
+    count = holder:GetAttribute("count") or COUNT
+    most = holder:GetAttribute("most") or math.max(0, count - SHOWN)
+    local offset = holder:GetAttribute("offset") or 0
+    motion.mode, motion.pos, motion.vel, motion.target, motion.settledAt = nil, offset, 0, offset, offset
+    local db = ns.db and ns.db.fan
+    if type(db) == "table" then db.active = index end
+    if not InCombatLockdown() then
+        if switch then switch:SetAttribute("active", index) end
+        for fanIndex, ring in ipairs(holders) do ring:SetShown(fanIndex == index) end
+        Render(offset)
+    end
+    if Fan.Refresh then Fan:Refresh() end
 end
 
 function ns.FanFirstSlot()
-    if not flip then return nil end
-    local page = flip:GetAttribute("page") == 2 and 2 or 1
-    local offset = pages[page]:GetAttribute("offset") or 0
-    return buttons[page][offset + 1]
+    if not holder then return nil end
+    return buttons[(holder:GetAttribute("offset") or 0) + 1]
 end
 
 function ns.FanLockIcon() end
 
-function ns.FanArrow()
-    if not setButton then return end
-    local page = flip:GetAttribute("page") == 2 and 2 or 1
-    local later = (pages[page]:GetAttribute("offset") or 0) > 0
-    setButton.arrow:SetRotation(math.rad(later and -45 or 135))
+-- The ring settled on a new spell: the page-turn sound, unless it is switched off. The gold
+-- flash is kept for running into an end (FanBump).
+function ns.FanFeedback()
+    if PlaySound and Settings().sound ~= false then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_ABILITY_PAGE_TURN) or 836, "Master") end
 end
 
-function ns.FanFeedback()
-    if PlaySound then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_ABILITY_PAGE_TURN) or 836, "Master") end
+-- The ring ran into one of its ends: a short flash, and the spring does the bounce.
+function ns.FanBump()
     if flash and flash.anim then flash.anim:Stop(); flash.anim:Play() end
 end
 
@@ -349,25 +611,6 @@ function ns.FanCursorAngle()
     return math.deg(math.atan(dy / dx))
 end
 
-function ns.FanTurn(page, turns)
-    if InCombatLockdown() or (turns < SWIPE and turns > -SWIPE) then return end
-    local holder = pages[page]
-    local offset = (holder:GetAttribute("offset") or 0) > 0 and 0 or (holder:GetAttribute("most") or 0)
-    holder:SetAttribute("offset", offset)
-    holder:SetAttribute("swiped", true)
-    local shown = holder:GetAttribute("shown") or SHOWN
-    for index, button in ipairs(buttons[page]) do
-        local slot = index - offset
-        if index <= (holder:GetAttribute("count") or SHOWN) and slot >= 1 and slot <= shown then
-            button:ClearAllPoints()
-            button:SetPoint("CENTER", holder, "BOTTOMRIGHT", holder:GetAttribute("x" .. slot), holder:GetAttribute("y" .. slot))
-            button:Show()
-        else
-            button:Hide()
-        end
-    end
-end
-
 local function Place(button, x, y, size, reach)
     button:ClearAllPoints()
     button:SetSize(size, size)
@@ -379,50 +622,48 @@ end
 function Fan:Layout()
     if not root or InCombatLockdown() then return end
     local fan = Settings()
-    if not fan.enabled or not ns.DuoLayout() then root:Hide(); return end
+    -- The classic fan was chosen: it takes over once the interface reloads.
+    if not fan.enabled or not ns.DuoLayout() or ns.FanMode() ~= "spin" then Fan.ring = nil; root:Hide(); return end
 
     local height = UIParent:GetHeight()
     local outer = height * fan.radius / 100
     local top = height * (fan.radius + TOP_RING) / 100
     local size, small = fan.size, math.floor(fan.size * SMALL + 0.5)
-    local step = (LAST - FIRST) / (SHOWN - 1)
-    local wheel = fan.style == "wheel"
-    local count = wheel and PER_PAGE or SHOWN
-    for page = 1, PAGES do
-        local holder = pages[page]
-        local offset = wheel and fan.offsets[page] or 0
-        holder:SetSize(outer + size, outer + size)
-        holder:SetAttribute("size", outer + size)
-        holder:SetAttribute("wheel", wheel)
-        holder:SetAttribute("step", step)
-        holder:SetAttribute("shown", SHOWN)
-        holder:SetAttribute("count", count)
-        holder:SetAttribute("most", count - SHOWN)
-        holder:SetAttribute("offset", offset)
+    geometry.outer, geometry.size = outer, size
+    motion.mode = nil
+    local span = outer + size * 1.5
+    local on = 0
+    for fanIndex, ring in ipairs(holders) do
+        local settings = fan.fans[fanIndex]
+        local fanCount = settings.count
+        local fanMost = math.max(0, fanCount - SHOWN)
+        local offset = ns.Clamp(fan.offsets[fanIndex] or 0, 0, fanMost)
+        fan.offsets[fanIndex] = offset
+        ring:SetSize(span, span)
+        ring:SetAttribute("shown", SHOWN)
+        ring:SetAttribute("count", fanCount)
+        ring:SetAttribute("most", fanMost)
+        ring:SetAttribute("offset", offset)
         for slot = 1, SHOWN do
-            local x, y = Polar(outer, FIRST + (slot - 1) * step)
-            holder:SetAttribute("x" .. slot, x)
-            holder:SetAttribute("y" .. slot, y)
+            local x, y = Polar(outer, FIRST + (slot - 1) * STEP)
+            ring:SetAttribute("x" .. slot, x)
+            ring:SetAttribute("y" .. slot, y)
         end
-        for index, button in ipairs(buttons[page]) do
+        for index, button in ipairs(fanButtons[fanIndex]) do
+            button:SetAttribute("useOnKeyDown", false)
+            local x, y = Polar(outer, FIRST + (index - 1 - offset) * STEP)
+            Place(button, x, y, size, REACH)
+            button:SetFrameLevel(root:GetFrameLevel() + 4)
             local slot = index - offset
-            button:SetAttribute("useOnKeyDown", not wheel)
-            if index <= count and slot >= 1 and slot <= SHOWN then
-                local x, y = Polar(outer, FIRST + (slot - 1) * step)
-                Place(button, x, y, size, REACH)
-                button:SetFrameLevel(root:GetFrameLevel() + 4)
-                button:Show()
-            else
-                button:SetSize(size, size)
-                button:Hide()
-            end
+            button:SetShown(index <= fanCount and slot >= 1 and slot <= SHOWN)
             ns.ApplyButton(button)
         end
+        switch:SetAttribute("on" .. fanIndex, settings.on and true or nil)
+        if settings.on then on = on + 1 end
     end
+
     local tx, ty = Polar(top, TAB_ANGLE)
     Place(tab, tx, ty, small, REACH_SMALL)
-    local fx, fy = Polar(top, PAGE_ANGLE)
-    Place(flip, fx, fy, small, REACH_SMALL)
     tab:SetFrameLevel(root:GetFrameLevel() + 6)
     local radius = height * JUMP
     jump:ClearAllPoints()
@@ -435,59 +676,52 @@ function Fan:Layout()
     jump.iconFrame:SetSize(iconSize, iconSize)
     jump.iconFrame:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", -radius * 0.42, radius * 0.42)
     jump.icon:SetAllPoints(jump.iconFrame)
-    local rx, ry = Polar(outer + size * 0.85, FIRST)
-    range:ClearAllPoints()
-    range:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", rx, ry + size * 0.15)
-    range:SetShown(wheel)
-    local sx, sy = Polar(height * FLIP_RADIUS, FLIP_ANGLE)
-    local setSize = math.floor(size * 0.62 + 0.5)
-    setButton:ClearAllPoints()
-    setButton:SetSize(setSize, setSize)
-    setButton:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", sx, sy)
-    setButton:SetHitRectInsets(-8, -8, -8, -8)
-    setButton:SetFrameLevel(root:GetFrameLevel() + 6)
-    setButton.arrow:SetSize(setSize * 1.15, setSize * 1.15)
-    setButton:SetShown(wheel)
-    ns.FanArrow()
+    local sx, sy = Polar(height * SWITCH_RADIUS, SWITCH_ANGLE)
+    local switchSize = math.floor(size * 0.62 + 0.5)
+    switch:ClearAllPoints()
+    switch:SetSize(switchSize, switchSize)
+    switch:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", sx, sy)
+    switch:SetHitRectInsets(-8, -8, -8, -8)
+    switch.arrow:SetSize(switchSize * 1.15, switchSize * 1.15)
+    switch:SetFrameLevel(root:GetFrameLevel() + 6)
+    switch:SetShown(on > 1)
     local reach = (outer + size * 0.7) * 2
     flash:ClearAllPoints()
     flash:SetSize(reach, reach)
     flash:SetPoint("CENTER", UIParent, "BOTTOMRIGHT", 0, 0)
     jump.label:Hide()
-    flip:SetFrameLevel(root:GetFrameLevel() + 6)
-
-    flip:SetAttribute("page", fan.page)
-    flip.label:SetText(fan.page .. "/" .. PAGES)
-    for page = 1, PAGES do pages[page]:SetShown(page == fan.page) end
     root:Show()
-    self:Refresh()
+    Fan.ring = height > 0 and { inner = RING_INNER, outer = (outer + size * RING_MARGIN) / height } or nil
+    Fan.Activate(fan.active)
+end
+
+local function EveryButton(fn)
+    for _, list in ipairs(fanButtons) do
+        for _, button in ipairs(list) do fn(button) end
+    end
 end
 
 function Fan:Refresh()
     if not root then return end
-    for page = 1, PAGES do
-        for _, button in ipairs(buttons[page]) do
-            ns.RefreshButton(button)
-            button:SetAlpha((button:GetEntry() or ns.editing or ns.slotEditing) and 1 or 0.35)
-        end
+    EveryButton(ns.RefreshButton)
+    if not InCombatLockdown() then
+        Render(motion.pos)
+    else
+        for _, button in ipairs(buttons) do button:SetAlpha(BaseAlpha(button)) end
     end
 end
 
 function Fan:SetEditing() self:Refresh(); ns.FanLockIcon() end
 
 function Fan:CombatStarts()
-    for page = 1, PAGES do
-        for _, button in ipairs(buttons[page]) do
-            if button.suppressed then ns.ApplyButton(button) end
-        end
-    end
+    EveryButton(function(button)
+        if button.suppressed then ns.ApplyButton(button) end
+    end)
 end
 
 local function Each(fn)
     if not root then return end
-    for page = 1, PAGES do
-        for _, button in ipairs(buttons[page]) do fn(button) end
-    end
+    EveryButton(fn)
 end
 
 local ticker = CreateFrame("Frame")
@@ -496,16 +730,8 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
     since = since + elapsed
     if since < 0.2 or not root or not root:IsShown() then return end
     since = 0
-    for page = 1, PAGES do
-        if pages[page]:IsShown() then
-            for _, button in ipairs(buttons[page]) do
-                if button:IsShown() then ns.UpdateState(button) end
-            end
-            if range and range:IsShown() then
-                local first = (page - 1) * PER_PAGE + (pages[page]:GetAttribute("offset") or 0) + 1
-                range:SetText(first .. "-" .. (first + SHOWN - 1))
-            end
-        end
+    for _, button in ipairs(buttons) do
+        if button:IsShown() then ns.UpdateState(button) end
     end
 end)
 
@@ -521,9 +747,10 @@ ns.On("SPELLS_CHANGED", function()
     if not InCombatLockdown() then Each(ns.ApplyButton) end
 end)
 ns.On("PLAYER_REGEN_ENABLED", function()
-    if not (ns.db and flip and type(ns.db.fan) == "table") then return end
-    ns.db.fan.page = flip:GetAttribute("page") == 2 and 2 or 1
-    for page = 1, PAGES do ns.db.fan.offsets[page] = pages[page]:GetAttribute("offset") or 0 end
+    if not (ns.db and holder and type(ns.db.fan) == "table") then return end
+    for fanIndex, ring in ipairs(holders) do ns.db.fan.offsets[fanIndex] = ring:GetAttribute("offset") or 0 end
+    local offset = holder:GetAttribute("offset") or 0
+    if not motion.mode then motion.pos, motion.target, motion.settledAt = offset, offset, offset; Render(offset) end
 end)
 
 local function HideRight()
@@ -542,7 +769,7 @@ end
 local slash = SlashCmdList.WOLKARAMOBILE
 SlashCmdList.WOLKARAMOBILE = function(message)
     local command, value = (message or ""):lower():match("^%s*fan%s*(%S*)%s*(%S*)")
-    if not command or not ns.db then return slash(message) end
+    if not command or not ns.db or ns.FanMode() ~= "spin" then return slash(message) end
     if InCombatLockdown() then ns.Print("change the fan out of combat."); return end
     local fan = Settings()
     local number = tonumber(value)
@@ -550,13 +777,11 @@ SlashCmdList.WOLKARAMOBILE = function(message)
     elseif command == "off" then fan.enabled = false
     elseif command == "size" and number then fan.size = ns.Clamp(number, 40, 80)
     elseif command == "reach" and number then fan.radius = ns.Clamp(number, 22, 50)
-    elseif command == "pages" or command == "wheel" then fan.style = command
-    elseif command == "debug" then ns.fanDebug = not ns.fanDebug; ns.Print("fan debug " .. (ns.fanDebug and "on" or "off") .. "."); return
     else
-        ns.Print("/mobile fan on, off, pages, wheel, size 40-80, reach 22-50. Now: " .. (fan.enabled and "on" or "off")
-            .. ", " .. fan.style .. ", size " .. fan.size .. ", reach " .. fan.radius .. ".")
+        ns.Print("/mobile fan on, off, size 40-80, reach 22-50. Now: " .. (fan.enabled and "on" or "off")
+            .. ", size " .. fan.size .. ", reach " .. fan.radius .. ".")
         return
     end
     ns.MarkChanged(); ns.Layout(); ns.Refresh()
-    ns.Print("fan " .. (fan.enabled and "on" or "off") .. ", " .. fan.style .. ", size " .. fan.size .. ", reach " .. fan.radius .. ".")
+    ns.Print("fan " .. (fan.enabled and "on" or "off") .. ", size " .. fan.size .. ", reach " .. fan.radius .. ".")
 end

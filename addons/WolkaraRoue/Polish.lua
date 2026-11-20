@@ -9,7 +9,7 @@ hider:Hide()
 
 local function Slots()
     local list = {}
-    for page = 1, 2 do for index = 1, 10 do list[#list + 1] = _G["WolkaraMobileFan" .. page .. "Skill" .. index] end end
+    for fan = 1, 4 do for index = 1, 15 do list[#list + 1] = _G["WolkaraMobileFan" .. fan .. "Skill" .. index] end end
     for page = 1, 5 do for index = 1, 5 do list[#list + 1] = _G["WolkaraMobileQuick" .. page .. "Slot" .. index] end end
     return list
 end
