@@ -922,6 +922,14 @@ NSArray<TKWoWAddon *> *TKWoWAddonsAtDirectory(NSString *directory) {
     _columns=savedColumns?savedColumns.unsignedIntegerValue:TKAddonColumnAll;
     return self;
 }
+// The WolkaraRoue package this app ships, as a row in My Add-ons with its own Install or Update.
+// It used to appear only when the front page's recommendation row opened this page, and that
+// row is no longer shown, which left a newer packaged release with no way onto the device. So
+// it is offered whenever My Add-ons is this product's own list; only the Mac-Ever page, a Browse
+// list of one CurseForge project, leaves it out. Offering it installs nothing by itself.
+- (BOOL)offersBundledPackage {
+    return _recommendation!=TKAddonRecommendationMacEver;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
@@ -953,7 +961,7 @@ NSArray<TKWoWAddon *> *TKWoWAddonsAtDirectory(NSString *directory) {
     [self reloadAddons];
     // Resolve the bundled package after the installed list, because the row's own word
     // (Install or Update) depends on whether this store already owns WolkaraRoue.
-    if (_recommendation==TKAddonRecommendationWolkaraRoue) [self reloadBundledPackage];
+    if ([self offersBundledPackage]) [self reloadBundledPackage];
     [self updateToolbar];
     if (_startInBrowse) {
         [self selectTab:TKAddonHubTabBrowse];
@@ -2456,7 +2464,7 @@ static NSString *TKAddonInstalledFilterKey(NSInteger filter) {
     NSMutableArray<NSDictionary *> *sections=[NSMutableArray array];
     NSMutableArray *summary=[NSMutableArray array];
     [summary addObject:@{ @"kind": @"summary" }];
-    if (_recommendation==TKAddonRecommendationWolkaraRoue) [summary addObject:@{ @"kind": @"bundled" }];
+    if ([self offersBundledPackage]) [summary addObject:@{ @"kind": @"bundled" }];
     // The explanatory line only when there is something to explain: an empty list already says
     // it is empty one row above. A dictionary literal cannot carry nil, so the footer is added
     // only when there is one.
