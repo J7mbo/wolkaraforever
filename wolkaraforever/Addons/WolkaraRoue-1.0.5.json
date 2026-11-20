@@ -2,8 +2,8 @@
   "archive": "WolkaraRoue-1.0.5.zip",
   "files": {
     "WolkaraRoue/Actions.lua": {
-      "sha256": "29e0944b02e2423b25fc55fd1201ee3bf2da8ff6efc1fa10b8b79c85ca8279ed",
-      "size": 13410
+      "sha256": "35187444c3c33d44c206746dc22cf3fc59703ba5d287c2ee294d37d91f63ca9b",
+      "size": 13891
     },
     "WolkaraRoue/Bags.lua": {
       "sha256": "581dffb7c3fa1e72fbfdd7102001f17c9079dafaa724d90f99311134ce710dbc",
@@ -154,6 +154,6 @@
   "interface": 16001,
   "name": "WolkaraRoue",
   "release": "1.0.5",
-  "sha256": "ef2e4c7546c211e5133e92938136108b388044fa3eb7fd010b48826b84388db2",
+  "sha256": "c4741aae1831073745002b352cf550b48fc50e9862564d37445535f37cc90f4b",
   "version": 1
 }
