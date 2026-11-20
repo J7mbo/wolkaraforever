@@ -1,5 +1,6 @@
-# Throwaway (ci/ipa only): run the touch suites and the layer gate on the branch named in
-# .github/test-ref, on both matrix simulators, whenever this branch is pushed.
+# Throwaway (ci/ipa only): run the touch suites and the layer gate on each branch or commit
+# named in .github/test-ref (one per line; add main's commit as a baseline), on both matrix
+# simulators, whenever this branch is pushed.
 name: Branch tests
 on:
   push:
@@ -8,22 +9,35 @@ on:
 permissions:
   contents: read
 jobs:
-  test:
-    runs-on: xcode-27
-    timeout-minutes: 150
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      refs: ${{ steps.refs.outputs.refs }}
     steps:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: .github/test-ref
           sparse-checkout-cone-mode: false
-          path: ci
-      - name: Which branch
-        id: target
-        run: echo "ref=$(tr -d '[:space:]' < ci/.github/test-ref)" >> "$GITHUB_OUTPUT"
+      - id: refs
+        run: echo "refs=$(grep -v '^\s*$' .github/test-ref | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin]))')" >> "$GITHUB_OUTPUT"
+  test:
+    needs: plan
+    name: test ${{ matrix.ref }}
+    runs-on: xcode-27
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.plan.outputs.refs) }}
+    steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.target.outputs.ref }}
+          ref: ${{ matrix.ref }}
           path: repo
+          fetch-depth: 0
+      - name: Tolkara upstream for the layer gate
+        working-directory: repo
+        run: git fetch --no-tags https://github.com/tolkara/tolkara.git main:refs/remotes/upstream/main
       - name: Use Xcode 27
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
