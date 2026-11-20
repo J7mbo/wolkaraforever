@@ -38,7 +38,7 @@ In **Game Settings Manager**, choose **Arm network health for next launch** only
 
 ## Manage add-ons
 
-Open **Add-On Manager** to view recorded packages, install the bundled WolkaraRoue package, import a validated archive, or browse a supported provider. An optional provider key stays in the device Keychain. The app removes only add-ons it recorded as managed.
+Open **Add-On Manager** to view recorded packages, install or update the bundled WolkaraRoue package (its row is always in **My Add-ons**), import a validated archive, or browse a supported provider. An optional provider key stays in the device Keychain. The app removes only add-ons it recorded as managed.
 
 When an add-on folder includes manifests for several WoW clients, the manager uses the manifest explicitly named for Forever or declaring Forever’s interface to show its title and version. It still considers every manifest when reporting compatibility.
 
@@ -55,6 +55,8 @@ Use **UI Manager** before large interface changes. **Gamepad UI** is first; its 
 Use the touch toolbar, trackpad, keyboard, gamepad, physical keyboard, or controller that fits your device. For dictation, open voice configuration, grant permission, select a trigger and Hold or Toggle behavior, then use **Test Voice** before dictating into a text field. Enabling dictation establishes the game's duplex audio route before a controller hold; the hold and release themselves do not change the audio category or remove the game output route. Leaving the app stops an open dictation capture, but does not add a WolkaraForever frame cap to the running guest.
 
 A DualSense or DualShock 4 touchpad can move the game's pointer. In **Input Manager**, open **Controller Touchpad Configuration**. It is off until you turn it on and is saved on the iPad. One finger moves the pointer and two fingers scroll. Pressing the touchpad is the left mouse button, or the right button with two fingers on the pad, and pressing while you slide drags. Tapping without pressing does nothing, so a thumb resting on the pad does not click. The controller touchpad and a physical mouse or trackpad hand off when the controller contact ends; iPadOS's duplicate mouse stream for the controller surface is ignored while that contact or click is active. The page offers Slow, Normal and Fast speeds plus a live controller-touchpad test showing the reported finger count and coordinates. While this is on, the touchpad click is the mouse button only and cannot be chosen as a dictation trigger. The dictation test is inside **Key / Controller Button Configuration**. A DualSense Edge connected over Bluetooth can omit touchpad reports on iPadOS; use its USB-C connection when the live test remains empty.
+
+The on-screen controller's settings also set how strongly each stick responds (**Movement stick sensitivity** and **Camera stick sensitivity**). With floating sticks, a tap that stays put reaches the game as a click, and holding a stick still for a moment and then moving drags in the game, for scrollbars and the map; the app's own buttons always take a touch before a stick does.
 
 ![Voice configuration](screenshots/voice-configuration.jpg)
 
