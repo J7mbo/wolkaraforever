@@ -52,6 +52,11 @@ typedef NS_ENUM(NSInteger, AKGamepadLayoutMode) {
 @property(nonatomic) CGFloat opacity;
 @property(nonatomic) CGFloat rearScale;
 @property(nonatomic) CGFloat frontScale;
+/// How strongly each stick answers, 0.3...1 (default 1). 1 is the response every release has
+/// had; lower values add a small dead zone, bend the response so the first part of the throw is
+/// gentle, and lower the top speed (about half at 0.3). Shaped by AKTouchGamepadShapeStick.
+@property(nonatomic) CGFloat moveSensitivity;
+@property(nonatomic) CGFloat cameraSensitivity;
 @property(nonatomic) BOOL hapticsEnabled;
 // Swap the visual shoulder slots only; controller element identities are unchanged.
 @property(nonatomic) BOOL swapShoulders;

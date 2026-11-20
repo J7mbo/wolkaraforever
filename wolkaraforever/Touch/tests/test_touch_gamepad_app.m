@@ -1304,6 +1304,24 @@ static void TestFloating(UIView *host, AKPreviewGamepad *manager) {
     [manager toggleSettings]; [host layoutIfNeeded];
     puts("TOUCH_GAMEPAD_FLOATING_PASS: the floating arrangement exists only with the mobile interface (ipados, a malformed value and no value keep Standard), each thumb's half is its stick, the corner is the jump, the bottom centre is left to the game, a reserved area is the player's own and wins over a half, and auto-run arms, confirms, runs, stops and is released by leaving the arrangement.");
 }
+// The sensitivity curve: full sensitivity is the stick as it is; lower values add a small dead
+// zone, soften small pushes and lower the top speed, keep the direction, and refuse nonsense.
+static void TestStickShape(void) {
+    CGPoint half=CGPointMake(0.5,0), full=CGPointMake(1,0), diagonal=CGPointMake(0.6,0.6);
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(half,1),half));
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(diagonal,1),diagonal));
+    CGPoint soft=AKTouchGamepadShapeStick(half,0.3);
+    assert(soft.x>0 && soft.x<0.1 && soft.y==0);                    // a half push is gentle
+    assert(fabs(AKTouchGamepadShapeStick(full,0.3).x-0.545)<0.001);  // the top speed is lower
+    assert(AKTouchGamepadShapeStick(full,0.6).x>AKTouchGamepadShapeStick(full,0.3).x);
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(CGPointMake(0.05,0),0.3),CGPointZero));  // the dead zone
+    CGPoint bent=AKTouchGamepadShapeStick(diagonal,0.5);
+    assert(fabs(bent.x-bent.y)<0.0001 && bent.x>0);                 // the direction is kept
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(half,0.1),AKTouchGamepadShapeStick(half,0.3)));  // clamped to 0.3
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(CGPointMake(NAN,0),0.5),CGPointZero));
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(half,NAN),CGPointZero));
+    assert(CGPointEqualToPoint(AKTouchGamepadShapeStick(CGPointZero,0.5),CGPointZero));
+}
 static void TestStickMapping(void) {
     CGSize size=CGSizeMake(100,100);
     assert(CGPointEqualToPoint(AKTouchGamepadStickPosition(CGPointMake(50,50),size),CGPointZero));
@@ -1353,6 +1371,7 @@ static void TestTrackingPump(void) {
 static void TestLifecycle(UIView *host) {
     TestTrackingPump();
     TestStickMapping();
+    TestStickShape();
     TestHaptics();
     TestInterfaceMode();
     // The Touch Controller 2 fixtures that need no window: the log's boundary, the layout's

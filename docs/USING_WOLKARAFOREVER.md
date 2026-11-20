@@ -56,6 +56,8 @@ Use the touch toolbar, trackpad, keyboard, gamepad, physical keyboard, or contro
 
 A DualSense or DualShock 4 touchpad can move the game's pointer. In **Input Manager**, open **Controller Touchpad Configuration**. It is off until you turn it on and is saved on the iPad. One finger moves the pointer and two fingers scroll. Pressing the touchpad is the left mouse button, or the right button with two fingers on the pad, and pressing while you slide drags. Tapping without pressing does nothing, so a thumb resting on the pad does not click. The controller touchpad and a physical mouse or trackpad hand off when the controller contact ends; iPadOS's duplicate mouse stream for the controller surface is ignored while that contact or click is active. The page offers Slow, Normal and Fast speeds plus a live controller-touchpad test showing the reported finger count and coordinates. While this is on, the touchpad click is the mouse button only and cannot be chosen as a dictation trigger. The dictation test is inside **Key / Controller Button Configuration**. A DualSense Edge connected over Bluetooth can omit touchpad reports on iPadOS; use its USB-C connection when the live test remains empty.
 
+The on-screen controller's settings also set how strongly each stick responds: **Movement stick sensitivity** and **Camera stick sensitivity**. At 100 % a stick behaves as it always has; lower values make small pushes gentler and lower the top speed, for finer control of movement or of the camera.
+
 ![Voice configuration](screenshots/voice-configuration.jpg)
 
 ## Battery-saving sound
