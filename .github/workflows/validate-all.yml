@@ -1,0 +1,66 @@
+# Throwaway (ci/ipa only): everything validate.sh --full runs, except the rows that need a
+# physical iPad or a signing team, split into groups that run side by side, for the branch in
+# .github/validate-ref. Each group runs every suite even after a failure and lists them all.
+name: Validate (all, parallel)
+on:
+  push:
+    branches: [ci/ipa]
+    paths: [.github/validate-ref, .github/workflows/validate-all.yml, .github/run-group.sh]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  group:
+    name: ${{ matrix.group }}
+    runs-on: xcode-27
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { group: mac-tools,          boot: "" }
+          - { group: mac-builds,         boot: "" }
+          - { group: sim-ui,             boot: "ipad iphone" }
+          - { group: sim-input,          boot: "ipad" }
+          - { group: touch-ipad,         boot: "ipad",   simulator: ipad }
+          - { group: touch-iphone,       boot: "iphone", simulator: iphone }
+          - { group: platform-emulation, boot: "" }
+          - { group: full-sim,           boot: "ipad" }
+    env:
+      SIMULATOR: ${{ matrix.simulator || 'ipad' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/validate-ref
+            .github/run-group.sh
+          sparse-checkout-cone-mode: false
+          path: ci
+      - id: target
+        run: echo "ref=$(tr -d '[:space:]' < ci/.github/validate-ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+          path: repo
+          fetch-depth: 0
+      - name: Use Xcode 27
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
+      - name: Matrix simulators
+        working-directory: repo
+        run: wolkaraforever/tools/setup_simulators.sh --apply
+      - name: Start booting the simulators this group uses
+        if: matrix.boot != ''
+        working-directory: repo
+        run: |
+          . wolkaraforever/tools/simulators.sh
+          for s in ${{ matrix.boot }}; do simulator_use "$s"; xcrun simctl boot "$SIM_ID" || true; done
+      - name: The pinned Tolkara commit for the layer gate
+        working-directory: repo
+        run: |
+          pin=$(git log --grep='^git-subtree-dir: platform$' -n 1 --format=%B | sed -n 's/^git-subtree-split: //p')
+          git fetch --quiet https://github.com/tolkara/tolkara.git "$pin"
+          git update-ref refs/remotes/upstream/main "$pin"
+      - run: brew install xcodegen
+      - name: Run the group
+        working-directory: repo
+        run: ../ci/.github/run-group.sh ${{ matrix.group }}
