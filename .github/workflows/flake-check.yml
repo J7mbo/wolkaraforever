@@ -28,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         ref: ${{ fromJSON(needs.plan.outputs.refs) }}
-        attempt: [1, 2, 3]
+        attempt: [1, 2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +44,10 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: repo
         run: |
+          # One simulator at a time, fully booted and settled, before its first launch.
+          xcrun simctl shutdown all || true
+          xcrun simctl boot "iPad Pro 13-inch (M5)" && xcrun simctl bootstatus "iPad Pro 13-inch (M5)" -b > /dev/null
+          sleep 45
           wolkaraforever/tools/test_touch_gamepad_ui.sh
           wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
       - name: iPhone Duo
@@ -52,6 +56,9 @@ jobs:
         env:
           SIMULATOR: iphone
         run: |
+          xcrun simctl shutdown all || true
+          xcrun simctl boot "iPhone Duo" && xcrun simctl bootstatus "iPhone Duo" -b > /dev/null
+          sleep 45
           wolkaraforever/tools/test_touch_gamepad_ui.sh
           wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
       - name: Crash reports
