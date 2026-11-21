@@ -92,6 +92,22 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: repo
         run: wolkaraforever/tools/test_touch_controls_ui.sh
+      - name: Voice and input rules
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: wolkaraforever/tools/test_voice.sh
+      - name: Controller input
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: wolkaraforever/tools/test_controller_input.sh
+      - name: Launcher pages
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: wolkaraforever/tools/test_wow_launcher_ui.sh
+      - name: Add-on hub (live, no API key)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: wolkaraforever/tools/test_addon_hub_live.sh
       - name: Crash reports
         if: ${{ !cancelled() }}
         run: |
