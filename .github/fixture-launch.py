@@ -10,11 +10,40 @@ into
 which has the app write stdout and stderr straight into files, waits for that process to exit,
 then adds that process's own entries from the simulator's system log, and writes it all to $LOG
 so every later grep works unchanged.
+It also puts a time limit on every xcrun and codesign call, so a hung compiler or
+simulator step fails within minutes and names itself instead of stalling the job.
 """
 import re
 import sys
 
 HELPER = r'''
+# A time limit on every xcrun and codesign call (the compiler, simctl install and launch): a
+# stuck one fails within minutes and says which step it was, instead of hanging the job.
+FIXTURE_STEP_LIMIT=${FIXTURE_STEP_LIMIT:-300}
+with_limit() {
+    local label=$1 ticks=0 pid
+    shift
+    "$@" &
+    pid=$!
+    while kill -0 "$pid" 2> /dev/null; do
+        sleep 0.2
+        ticks=$((ticks + 1))
+        if (( ticks >= FIXTURE_STEP_LIMIT * 5 )); then
+            echo "time limit: '$label' still running after ${FIXTURE_STEP_LIMIT} s, stopping it" >&2
+            pkill -9 -P "$pid" 2> /dev/null || true
+            kill -9 "$pid" 2> /dev/null || true
+            wait "$pid" 2> /dev/null || true
+            return 124
+        fi
+    done
+    wait "$pid"
+}
+xcrun() {
+    local label="xcrun $1 $2 $3"
+    echo "step: $label" >&2
+    with_limit "$label" command xcrun "$@"
+}
+codesign() { with_limit "codesign $*" command codesign "$@"; }
 # The fixture's output, without the simulator's console relay (it can drop the end of a run):
 # the app writes stdout and stderr straight to files, we wait for that process to exit, and the
 # process's own entries in the simulator's system log are added, matched by its pid.

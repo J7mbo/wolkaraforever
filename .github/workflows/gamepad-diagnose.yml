@@ -5,7 +5,7 @@ name: Gamepad diagnose
 on:
   push:
     branches: [ci/ipa]
-    paths: [.github/diag-ref, .github/workflows/gamepad-diagnose.yml, .github/fixture-launch.py]
+    paths: [.github/diag-ref, .github/workflows/gamepad-diagnose.yml]
 permissions:
   contents: read
 jobs:
