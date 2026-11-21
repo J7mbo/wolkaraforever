@@ -1,6 +1,6 @@
 # Throwaway (ci/ipa only): run the touch suites and the layer gate on each branch or commit
 # named in .github/test-ref (one per line; add main's commit as a baseline), on both matrix
-# simulators, whenever this branch is pushed.
+# simulators (one job per simulator, booted first), whenever this branch is pushed.
 name: Branch tests
 on:
   push:
@@ -22,13 +22,16 @@ jobs:
         run: echo "refs=$(grep -v '^\s*$' .github/test-ref | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin]))')" >> "$GITHUB_OUTPUT"
   test:
     needs: plan
-    name: test ${{ matrix.ref }}
+    name: ${{ matrix.ref }} on ${{ matrix.simulator }}
     runs-on: xcode-27
     timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         ref: ${{ fromJSON(needs.plan.outputs.refs) }}
+        simulator: [ipad, iphone]
+    env:
+      SIMULATOR: ${{ matrix.simulator }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,9 +45,6 @@ jobs:
           path: fix
       - name: Apply the fixture launch fix (candidate for its own MR)
         run: python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh
-      - name: Tolkara upstream for the layer gate
-        working-directory: repo
-        run: git fetch --no-tags https://github.com/tolkara/tolkara.git main:refs/remotes/upstream/main
       - name: Use Xcode 27
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
@@ -52,38 +52,34 @@ jobs:
           git -C repo log -1 --format='testing %H %s'
           xcrun simctl list runtimes
           xcrun simctl list devicetypes | grep -i "duo\|ipad pro 13" || true
-      - name: Install XcodeGen
-        run: brew install xcodegen
       - name: Matrix simulators
         working-directory: repo
         run: wolkaraforever/tools/setup_simulators.sh --apply
+      - name: Boot the simulator now (its first-boot setup overlaps the steps below)
+        working-directory: repo
+        run: |
+          . wolkaraforever/tools/simulators.sh
+          simulator_use "$SIMULATOR"
+          xcrun simctl boot "$SIM_ID" || true
+          date '+booting at %H:%M:%S'
+      - name: Tolkara upstream for the layer gate
+        working-directory: repo
+        run: git fetch --no-tags https://github.com/tolkara/tolkara.git main:refs/remotes/upstream/main
+      - name: Install XcodeGen
+        run: brew install xcodegen
       - name: Layer gate
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.simulator == 'ipad' }}
         working-directory: repo
         run: wolkaraforever/tools/check_layers.sh
-      - name: Touch gamepad - iPad Pro 13-inch (M5)
+      - name: Touch gamepad
         if: ${{ !cancelled() }}
         working-directory: repo
         run: |
           wolkaraforever/tools/test_touch_gamepad_ui.sh
           wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
-      - name: Touch gamepad - iPhone Duo
+      - name: Touch controls
         if: ${{ !cancelled() }}
         working-directory: repo
-        env:
-          SIMULATOR: iphone
-        run: |
-          wolkaraforever/tools/test_touch_gamepad_ui.sh
-          wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
-      - name: Touch controls - iPad Pro 13-inch (M5)
-        if: ${{ !cancelled() }}
-        working-directory: repo
-        run: wolkaraforever/tools/test_touch_controls_ui.sh
-      - name: Touch controls - iPhone Duo
-        if: ${{ !cancelled() }}
-        working-directory: repo
-        env:
-          SIMULATOR: iphone
         run: wolkaraforever/tools/test_touch_controls_ui.sh
       - name: Crash reports
         if: ${{ !cancelled() }}
