@@ -73,21 +73,6 @@ jobs:
             > "diag/controls-iphone.log" 2>&1 || true
           echo "controls-iphone: $(wc -l < diag/controls-iphone.log) lines"
           grep -E "termination reported by launchd|exited with context|Successfully spawned TouchControls" "diag/controls-iphone.log" | tail -30
-      - name: Simulator logs
-        if: false
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p diag
-          for SIM in "iPad Pro 13-inch (M5)" "iPhone Duo"; do
-            f="diag/$(echo "$SIM" | tr -c 'A-Za-z0-9' _).log"
-            xcrun simctl spawn "$SIM" log show --last 90m --style compact --info --debug \
-              --predicate 'process CONTAINS "Touch" OR eventMessage CONTAINS "touch-gamepad" OR eventMessage CONTAINS "touch-controls" OR eventMessage CONTAINS "TouchGamepad" OR eventMessage CONTAINS "TouchControls" OR subsystem BEGINSWITH "com.apple.GameController" OR process CONTAINS "gamecontroller" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "kill" OR eventMessage CONTAINS "jetsam")) OR (process == "SpringBoard" AND eventMessage CONTAINS "watchdog")' \
-              > "$f" 2>&1 || true
-            echo "=== $SIM: $(wc -l < "$f") lines; termination/kill/watchdog lines:"
-            grep -iE "terminat|kill|watchdog|jetsam|crash|signal|0x8badf00d|invalidat" "$f" | tail -80
-          done
-          cp repo/build/touch-*-fixture/*.log diag/ 2>/dev/null || true
-          find ~/Library/Logs/DiagnosticReports -type f -iname '*touch*' 2>/dev/null | head
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
