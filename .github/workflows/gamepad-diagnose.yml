@@ -1,0 +1,62 @@
+# Throwaway (ci/ipa only): one run of the gamepad input self-test on the iPad simulator, for the
+# branch in .github/diag-ref, saving the simulator's own log so a silent kill shows who and why.
+name: Gamepad diagnose
+on:
+  push:
+    branches: [ci/ipa]
+    paths: [.github/diag-ref, .github/workflows/gamepad-diagnose.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      SIM: iPad Pro 13-inch (M5)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/diag-ref
+          sparse-checkout-cone-mode: false
+          path: ci
+      - id: target
+        run: echo "ref=$(tr -d '[:space:]' < ci/.github/diag-ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+          path: repo
+      - name: Use Xcode 27
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
+      - run: brew install xcodegen
+      - name: Matrix simulators
+        working-directory: repo
+        run: wolkaraforever/tools/setup_simulators.sh --apply
+      - name: Gamepad input self-test (iPad)
+        id: test
+        continue-on-error: true
+        working-directory: repo
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > ../started
+          wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
+      - name: Simulator log
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p diag
+          xcrun simctl spawn "$SIM" log show --last 15m --style compact --info --debug \
+            --predicate 'process CONTAINS "TouchGamepad" OR eventMessage CONTAINS "touch-gamepad" OR eventMessage CONTAINS "TouchGamepad" OR subsystem BEGINSWITH "com.apple.GameController" OR process CONTAINS "gamecontroller" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "kill" OR eventMessage CONTAINS "jetsam")) OR (process == "SpringBoard" AND eventMessage CONTAINS "watchdog")' \
+            > diag/simulator.log 2>&1 || true
+          wc -l diag/simulator.log
+          echo "=== termination, kill, watchdog, crash and exit lines"
+          grep -iE "terminat|kill|watchdog|jetsam|crash|exit|signal|0x8badf00d|assertion|invalidat" diag/simulator.log | tail -120
+          echo "=== last 150 lines"
+          tail -150 diag/simulator.log
+          cp repo/build/touch-gamepad-fixture/*.log diag/ 2>/dev/null || true
+          find ~/Library/Logs/DiagnosticReports -newer started -type f 2>/dev/null | head -20
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: gamepad-diagnose
+          path: diag
+      - name: Result
+        if: ${{ !cancelled() }}
+        run: test "${{ steps.test.outcome }}" = success
