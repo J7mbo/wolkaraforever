@@ -1,5 +1,6 @@
-# Throwaway (ci/ipa only): one run of the gamepad input self-test on the iPad simulator, for the
-# branch in .github/diag-ref, saving the simulator's own log so a silent kill shows who and why.
+# Throwaway (ci/ipa only): the full touch sequence in ONE job for the branch in .github/diag-ref
+# (layer gate, then gamepad and controls on both matrix simulators), saving both simulators'
+# own logs at the end so a silent kill shows who and why.
 name: Gamepad diagnose
 on:
   push:
@@ -10,9 +11,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: xcode-27
-    timeout-minutes: 60
-    env:
-      SIM: iPad Pro 13-inch (M5)
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,38 +24,68 @@ jobs:
         with:
           ref: ${{ steps.target.outputs.ref }}
           path: repo
+          fetch-depth: 0
       - name: Use Xcode 27
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
       - run: brew install xcodegen
       - name: Matrix simulators
         working-directory: repo
         run: wolkaraforever/tools/setup_simulators.sh --apply
-      - name: Gamepad input self-test (iPad)
-        id: test
+      - name: Layer gate
         continue-on-error: true
         working-directory: repo
         run: |
-          date -u +%Y-%m-%dT%H:%M:%SZ > ../started
+          git fetch --no-tags https://github.com/tolkara/tolkara.git main:refs/remotes/upstream/main
+          wolkaraforever/tools/check_layers.sh
+      - name: Gamepad - iPad Pro 13-inch (M5)
+        id: gpad
+        continue-on-error: true
+        working-directory: repo
+        run: |
+          wolkaraforever/tools/test_touch_gamepad_ui.sh
           wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
-      - name: Simulator log
+      - name: Gamepad - iPhone Duo
+        id: gphone
+        continue-on-error: true
+        working-directory: repo
+        env:
+          SIMULATOR: iphone
+        run: |
+          wolkaraforever/tools/test_touch_gamepad_ui.sh
+          wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
+      - name: Controls - iPad Pro 13-inch (M5)
+        id: cpad
+        continue-on-error: true
+        working-directory: repo
+        run: wolkaraforever/tools/test_touch_controls_ui.sh
+      - name: Controls - iPhone Duo
+        id: cphone
+        continue-on-error: true
+        working-directory: repo
+        env:
+          SIMULATOR: iphone
+        run: wolkaraforever/tools/test_touch_controls_ui.sh
+      - name: Simulator logs
         if: ${{ !cancelled() }}
         run: |
           mkdir -p diag
-          xcrun simctl spawn "$SIM" log show --last 15m --style compact --info --debug \
-            --predicate 'process CONTAINS "TouchGamepad" OR eventMessage CONTAINS "touch-gamepad" OR eventMessage CONTAINS "TouchGamepad" OR subsystem BEGINSWITH "com.apple.GameController" OR process CONTAINS "gamecontroller" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "kill" OR eventMessage CONTAINS "jetsam")) OR (process == "SpringBoard" AND eventMessage CONTAINS "watchdog")' \
-            > diag/simulator.log 2>&1 || true
-          wc -l diag/simulator.log
-          echo "=== termination, kill, watchdog, crash and exit lines"
-          grep -iE "terminat|kill|watchdog|jetsam|crash|exit|signal|0x8badf00d|assertion|invalidat" diag/simulator.log | tail -120
-          echo "=== last 150 lines"
-          tail -150 diag/simulator.log
-          cp repo/build/touch-gamepad-fixture/*.log diag/ 2>/dev/null || true
-          find ~/Library/Logs/DiagnosticReports -newer started -type f 2>/dev/null | head -20
+          for SIM in "iPad Pro 13-inch (M5)" "iPhone Duo"; do
+            f="diag/$(echo "$SIM" | tr -c 'A-Za-z0-9' _).log"
+            xcrun simctl spawn "$SIM" log show --last 90m --style compact --info --debug \
+              --predicate 'process CONTAINS "Touch" OR eventMessage CONTAINS "touch-gamepad" OR eventMessage CONTAINS "touch-controls" OR eventMessage CONTAINS "TouchGamepad" OR eventMessage CONTAINS "TouchControls" OR subsystem BEGINSWITH "com.apple.GameController" OR process CONTAINS "gamecontroller" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "kill" OR eventMessage CONTAINS "jetsam")) OR (process == "SpringBoard" AND eventMessage CONTAINS "watchdog")' \
+              > "$f" 2>&1 || true
+            echo "=== $SIM: $(wc -l < "$f") lines; termination/kill/watchdog lines:"
+            grep -iE "terminat|kill|watchdog|jetsam|crash|signal|0x8badf00d|invalidat" "$f" | tail -80
+          done
+          cp repo/build/touch-*-fixture/*.log diag/ 2>/dev/null || true
+          find ~/Library/Logs/DiagnosticReports -type f -iname '*touch*' 2>/dev/null | head
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: gamepad-diagnose
+          name: touch-sequence-diagnose
           path: diag
       - name: Result
         if: ${{ !cancelled() }}
-        run: test "${{ steps.test.outcome }}" = success
+        run: |
+          echo "gamepad iPad=${{ steps.gpad.outcome }} iPhone=${{ steps.gphone.outcome }}; controls iPad=${{ steps.cpad.outcome }} iPhone=${{ steps.cphone.outcome }}"
+          test "${{ steps.gpad.outcome }}${{ steps.gphone.outcome }}" = successsuccess
