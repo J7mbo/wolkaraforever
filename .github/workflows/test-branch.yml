@@ -78,3 +78,10 @@ jobs:
         env:
           SIMULATOR: iphone
         run: wolkaraforever/tools/test_touch_controls_ui.sh
+      - name: Crash reports
+        if: ${{ !cancelled() }}
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/Touch*.ips 2>/dev/null | head -4); do
+            echo "=== $f"; head -c 12000 "$f"; echo
+          done
+          ls ~/Library/Logs/DiagnosticReports/ | tail -20 || true
