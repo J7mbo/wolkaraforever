@@ -1,0 +1,17 @@
+# Throwaway (ci/ipa only): calls the release gate's own reusable workflow from the MR branch,
+# exactly as release.yml calls it, for the MR branch itself.
+name: Release gate proof
+on:
+  push:
+    branches: [ci/ipa]
+    paths: [.github/workflows/release-gate-proof.yml]
+permissions:
+  contents: read
+jobs:
+  touch:
+    name: Touch suites
+    permissions:
+      contents: read
+    uses: J7mbo/wolkaraforever/.github/workflows/touch-suites.yml@fix/touch-suite-reliability
+    with:
+      ref: fix/touch-suite-reliability
