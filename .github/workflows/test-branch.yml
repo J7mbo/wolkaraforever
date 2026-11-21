@@ -43,8 +43,10 @@ jobs:
           sparse-checkout: .github/fixture-launch.py
           sparse-checkout-cone-mode: false
           path: fix
-      - name: Apply the CI fixes (launch, time limits, prepare and compile reuse; candidate for its own MR)
-        run: python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh repo/wolkaraforever/tools/prepare.sh
+      - name: Apply the CI fixes to a branch that does not carry them yet
+        run: |
+          if [ -f repo/wolkaraforever/tools/fixtures.sh ]; then echo "the branch carries the fixes itself"; exit 0; fi
+          python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh repo/wolkaraforever/tools/prepare.sh
       - name: Use Xcode 27
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
@@ -62,9 +64,13 @@ jobs:
           simulator_use "$SIMULATOR"
           xcrun simctl boot "$SIM_ID" || true
           date '+booting at %H:%M:%S'
-      - name: Tolkara upstream for the layer gate
+      - name: The pinned Tolkara commit for the layer gate (as upstream's ci.yml fetches it)
         working-directory: repo
-        run: git fetch --no-tags https://github.com/tolkara/tolkara.git main:refs/remotes/upstream/main
+        run: |
+          pin=$(git log --grep='^git-subtree-dir: platform$' -n 1 --format=%B | sed -n 's/^git-subtree-split: //p')
+          test -n "$pin" || { echo "No pinned platform commit recorded"; exit 1; }
+          git fetch --quiet https://github.com/tolkara/tolkara.git "$pin"
+          git update-ref refs/remotes/upstream/main "$pin"
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Layer gate
