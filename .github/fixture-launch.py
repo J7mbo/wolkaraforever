@@ -40,8 +40,37 @@ with_limit() {
 }
 xcrun() {
     local label="xcrun $1 $2 $3"
+    if [[ "${1:-} ${3:-}" == "--sdk clang" ]]; then
+        fixture_compile "$@"
+        return
+    fi
     echo "step: $label" >&2
     with_limit "$label" command xcrun "$@"
+}
+
+# A fixture compile is skipped when its output exists and nothing it reads has changed: the same
+# arguments, the same source files and the same headers in every -I folder. The second call of a
+# suite (the gamepad's --self-test-input) then reuses the first call's binary.
+fixture_compile() {
+    local arg out= previous=
+    local -a inputs=()
+    for arg in "$@"; do
+        if [[ "$previous" == -o ]]; then out=$arg
+        elif [[ "$arg" == -I* && -d "${arg#-I}" ]]; then inputs+=("${arg#-I}")
+        elif [[ -f "$arg" ]]; then inputs+=("$arg")
+        fi
+        previous=$arg
+    done
+    local key
+    key=$({ printf '%s\n' "$@"; find "${inputs[@]}" -type f -print0 | sort -z | xargs -0 shasum; } | shasum | cut -d' ' -f1)
+    if [[ -n "$out" && -f "$out" && "$(cat "$out.inputs" 2> /dev/null)" == "$key" ]]; then
+        echo "step: compile of $out reused, nothing it reads has changed" >&2
+        return 0
+    fi
+    echo "step: compile of ${out:-a fixture}" >&2
+    rm -f "$out.inputs"
+    with_limit "compile of ${out:-a fixture}" command xcrun "$@"
+    [[ -z "$out" ]] || printf '%s\n' "$key" > "$out.inputs"
 }
 codesign() { with_limit "codesign $*" command codesign "$@"; }
 # The fixture's output, without the simulator's console relay (it can drop the end of a run):
@@ -78,8 +107,35 @@ LAUNCH = re.compile(
     r'xcrun simctl launch --terminate-running-process --console "\$SIM_ID" (\S+)'
     r'((?:[^\n|]|\\\n)*?) 2>&1 \| tee "(\$\w+)"')
 
+PREPARE_CHECK = r'''
+# The prepared tree is reused when nothing it is made from has changed: the committed platform/,
+# every file of ours outside it (tracked or new, ignored ones excepted), the local signing values
+# and the generator's environment. Every suite calls this script, and rebuilding an identical tree
+# each time cost minutes per run. WOLKARA_PREPARE_FRESH=1 rebuilds it regardless.
+fingerprint=$({
+    git rev-parse HEAD:platform
+    git ls-files -z -co --exclude-standard -- . ':!platform' | sort -z | xargs -0 shasum 2> /dev/null || true
+    cat local.env platform/local.env 2> /dev/null || true
+    env | grep -E '^(TOLKARA_|DEVELOPMENT_TEAM=)' | sort || true
+} | shasum | cut -d' ' -f1)
+if [ -z "${WOLKARA_PREPARE_FRESH:-}" ] && [ -d "$dest" ] && [ "$(cat "$dest/.prepared-from" 2> /dev/null)" = "$fingerprint" ]; then
+    echo "prepare: $dest reused, nothing it is made from has changed"
+    exit 0
+fi
+'''
+
 for path in sys.argv[1:]:
     text = open(path).read()
+    if path.endswith('prepare.sh'):
+        trap = "trap 'rm -rf \"$lock\"' EXIT HUP INT TERM\n"
+        done = 'pinned=$(git rev-parse --short upstream/main'
+        if trap not in text or done not in text:
+            sys.exit(f"{path}: the lock or the final line moved; update fixture-launch.py")
+        text = text.replace(trap, trap + PREPARE_CHECK, 1)
+        text = text.replace(done, 'printf \'%s\\n\' "$fingerprint" > "$dest/.prepared-from"\n' + done, 1)
+        open(path, 'w').write(text)
+        print(f"{path}: an unchanged prepared tree is reused")
+        continue
     text, count = LAUNCH.subn(lambda m: f'fixture_launch "{m.group(3)}" {m.group(1)}{m.group(2)}', text)
     if count == 0:
         sys.exit(f"{path}: no console launch found")

@@ -43,8 +43,8 @@ jobs:
           sparse-checkout: .github/fixture-launch.py
           sparse-checkout-cone-mode: false
           path: fix
-      - name: Apply the fixture launch fix (candidate for its own MR)
-        run: python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh
+      - name: Apply the CI fixes (launch, time limits, prepare and compile reuse; candidate for its own MR)
+        run: python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh repo/wolkaraforever/tools/prepare.sh
       - name: Use Xcode 27
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
