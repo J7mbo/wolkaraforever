@@ -52,11 +52,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           mkdir -p diag
-          xcrun simctl spawn "iPad Pro 13-inch (M5)" log show --last 30m --style compact --info --debug \
+          UDID=$(xcrun simctl list devices booted | grep -F "iPad Pro 13-inch (M5) (" | grep -oE '[0-9A-F-]{36}' | head -1)
+          [ -n "$UDID" ] || { xcrun simctl list devices | grep -F "iPad Pro 13-inch (M5)"; UDID=$(xcrun simctl list devices | grep -F "iPad Pro 13-inch (M5) (" | grep -oE '[0-9A-F-]{36}' | head -1); xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null; }
+          echo "reading the log of $UDID"
+          xcrun simctl spawn "$UDID" log show --last 30m --style compact --info --debug \
             --predicate 'process CONTAINS "Touch" OR eventMessage CONTAINS "touch-controls" OR eventMessage CONTAINS "TouchControls" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "exited")) OR (process == "SpringBoard" AND (eventMessage CONTAINS "watchdog" OR eventMessage CONTAINS "Process exited"))' \
             > "diag/controls-ipad.log" 2>&1 || true
           echo "controls-ipad: $(wc -l < diag/controls-ipad.log) lines"
-          grep -E "termination reported by launchd|exited with context|Successfully spawned TouchControls" "diag/controls-ipad.log" | tail -30
+          grep -E "touch-controls.*(termination reported by launchd|exited with context)|Successfully spawned TouchControls" "diag/controls-ipad.log" | tail -40
       - name: Controls - iPhone Duo
         id: cphone
         continue-on-error: true
@@ -68,11 +71,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           mkdir -p diag
-          xcrun simctl spawn "iPhone Duo" log show --last 30m --style compact --info --debug \
+          UDID=$(xcrun simctl list devices booted | grep -F "iPhone Duo (" | grep -oE '[0-9A-F-]{36}' | head -1)
+          [ -n "$UDID" ] || { xcrun simctl list devices | grep -F "iPhone Duo"; UDID=$(xcrun simctl list devices | grep -F "iPhone Duo (" | grep -oE '[0-9A-F-]{36}' | head -1); xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null; }
+          echo "reading the log of $UDID"
+          xcrun simctl spawn "$UDID" log show --last 30m --style compact --info --debug \
             --predicate 'process CONTAINS "Touch" OR eventMessage CONTAINS "touch-controls" OR eventMessage CONTAINS "TouchControls" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "exited")) OR (process == "SpringBoard" AND (eventMessage CONTAINS "watchdog" OR eventMessage CONTAINS "Process exited"))' \
             > "diag/controls-iphone.log" 2>&1 || true
           echo "controls-iphone: $(wc -l < diag/controls-iphone.log) lines"
-          grep -E "termination reported by launchd|exited with context|Successfully spawned TouchControls" "diag/controls-iphone.log" | tail -30
+          grep -E "touch-controls.*(termination reported by launchd|exited with context)|Successfully spawned TouchControls" "diag/controls-iphone.log" | tail -40
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
