@@ -1,0 +1,63 @@
+# Throwaway (ci/ipa only): run the touch gamepad suites three times on each branch or commit in
+# .github/flake-ref, to tell an intermittent crash in a change from one in the fixture.
+name: Gamepad repeat check
+on:
+  push:
+    branches: [ci/ipa]
+    paths: [.github/flake-ref, .github/workflows/flake-check.yml]
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      refs: ${{ steps.refs.outputs.refs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/flake-ref
+          sparse-checkout-cone-mode: false
+      - id: refs
+        run: echo "refs=$(grep -v '^\s*$' .github/flake-ref | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin]))')" >> "$GITHUB_OUTPUT"
+  gamepad:
+    needs: plan
+    name: ${{ matrix.ref }} try ${{ matrix.attempt }}
+    runs-on: xcode-27
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.plan.outputs.refs) }}
+        attempt: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: repo
+      - name: Use Xcode 27
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
+      - run: brew install xcodegen
+      - name: Matrix simulators
+        working-directory: repo
+        run: wolkaraforever/tools/setup_simulators.sh --apply
+      - name: iPad Pro 13-inch (M5)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: |
+          wolkaraforever/tools/test_touch_gamepad_ui.sh
+          wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
+      - name: iPhone Duo
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        env:
+          SIMULATOR: iphone
+        run: |
+          wolkaraforever/tools/test_touch_gamepad_ui.sh
+          wolkaraforever/tools/test_touch_gamepad_ui.sh --self-test-input
+      - name: Crash reports
+        if: ${{ !cancelled() }}
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/Touch*.ips ~/Library/Logs/DiagnosticReports/*/Touch*.ips 2>/dev/null | head -3); do
+            echo "=== $f"; head -c 15000 "$f"; echo
+          done
+          find ~/Library/Logs/DiagnosticReports -iname '*touch*' 2>/dev/null | head
