@@ -47,6 +47,11 @@ jobs:
         run: |
           if [ -f repo/wolkaraforever/tools/fixtures.sh ]; then echo "the branch carries the fixes itself"; exit 0; fi
           python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh repo/wolkaraforever/tools/prepare.sh
+      - name: Fixture helper test (when the branch has it)
+        working-directory: repo
+        run: |
+          if [ -f wolkaraforever/tools/tests/test_fixtures.sh ]; then wolkaraforever/tools/tests/test_fixtures.sh
+          else echo "the branch has no test_fixtures.sh"; fi
       - name: Use Xcode 27
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
