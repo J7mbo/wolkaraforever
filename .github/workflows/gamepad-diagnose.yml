@@ -1,11 +1,11 @@
-# Throwaway (ci/ipa only): the full touch sequence in ONE job for the branch in .github/diag-ref
-# (layer gate, then gamepad and controls on both matrix simulators), saving both simulators'
-# own logs at the end so a silent kill shows who and why.
+# Throwaway (ci/ipa only): the touch suites (gamepad and controls, iPad and iPhone) for the branch
+# in .github/diag-ref, with the candidate fix applied: fixtures write their output straight to
+# files and their own system-log entries are added, instead of the simulator's console relay.
 name: Gamepad diagnose
 on:
   push:
     branches: [ci/ipa]
-    paths: [.github/diag-ref, .github/workflows/gamepad-diagnose.yml]
+    paths: [.github/diag-ref, .github/workflows/gamepad-diagnose.yml, .github/fixture-launch.py]
 permissions:
   contents: read
 jobs:
@@ -32,34 +32,40 @@ jobs:
           fetch-depth: 0
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .github/fixture-flush.py
+          sparse-checkout: .github/fixture-launch.py
           sparse-checkout-cone-mode: false
           path: fix
-      - name: Apply the candidate fixture fix
-        run: python3 fix/.github/fixture-flush.py repo/wolkaraforever/Touch/tests/test_touch_gamepad_app.m repo/wolkaraforever/Touch/tests/test_touch_controls_app.m
+      - name: Apply the candidate fix
+        run: python3 -I fix/.github/fixture-launch.py repo/wolkaraforever/tools/test_touch_controls_ui.sh repo/wolkaraforever/tools/test_touch_gamepad_ui.sh
       - name: Use Xcode 27
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
       - run: brew install xcodegen
       - name: Matrix simulators
         working-directory: repo
         run: wolkaraforever/tools/setup_simulators.sh --apply
+      - name: Gamepad - iPad Pro 13-inch (M5)
+        id: gpad
+        continue-on-error: true
+        working-directory: repo
+        run: wolkaraforever/tools/test_touch_gamepad_ui.sh
+      - name: Keep the gamepad iPad logs
+        if: ${{ !cancelled() }}
+        run: mkdir -p diag/gamepad-ipad && cp -R repo/build/platform/build/touch-gamepad-fixture/*.log* diag/gamepad-ipad/ 2>/dev/null || true
+      - name: Gamepad - iPhone Duo
+        id: gphone
+        continue-on-error: true
+        working-directory: repo
+        env:
+          SIMULATOR: iphone
+        run: wolkaraforever/tools/test_touch_gamepad_ui.sh
       - name: Controls - iPad Pro 13-inch (M5)
         id: cpad
         continue-on-error: true
         working-directory: repo
         run: wolkaraforever/tools/test_touch_controls_ui.sh
-      - name: Log - controls-ipad
+      - name: Keep the iPad logs
         if: ${{ !cancelled() }}
-        run: |
-          mkdir -p diag
-          UDID=$(xcrun simctl list devices booted | grep -F "iPad Pro 13-inch (M5) (" | grep -oE '[0-9A-F-]{36}' | head -1)
-          [ -n "$UDID" ] || { xcrun simctl list devices | grep -F "iPad Pro 13-inch (M5)"; UDID=$(xcrun simctl list devices | grep -F "iPad Pro 13-inch (M5) (" | grep -oE '[0-9A-F-]{36}' | head -1); xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null; }
-          echo "reading the log of $UDID"
-          xcrun simctl spawn "$UDID" log show --last 30m --style compact --info --debug \
-            --predicate 'process CONTAINS "Touch" OR eventMessage CONTAINS "touch-controls" OR eventMessage CONTAINS "TouchControls" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "exited")) OR (process == "SpringBoard" AND (eventMessage CONTAINS "watchdog" OR eventMessage CONTAINS "Process exited"))' \
-            > "diag/controls-ipad.log" 2>&1 || true
-          echo "controls-ipad: $(wc -l < diag/controls-ipad.log) lines"
-          grep -E "touch-controls.*(termination reported by launchd|exited with context)|Successfully spawned TouchControls" "diag/controls-ipad.log" | tail -40
+        run: mkdir -p diag/ipad && cp -R repo/build/platform/build/touch-controls-fixture/*.log* diag/ipad/ 2>/dev/null || true
       - name: Controls - iPhone Duo
         id: cphone
         continue-on-error: true
@@ -67,25 +73,17 @@ jobs:
         env:
           SIMULATOR: iphone
         run: wolkaraforever/tools/test_touch_controls_ui.sh
-      - name: Log - controls-iphone
+      - name: Keep the iPhone logs
         if: ${{ !cancelled() }}
-        run: |
-          mkdir -p diag
-          UDID=$(xcrun simctl list devices booted | grep -F "iPhone Duo (" | grep -oE '[0-9A-F-]{36}' | head -1)
-          [ -n "$UDID" ] || { xcrun simctl list devices | grep -F "iPhone Duo"; UDID=$(xcrun simctl list devices | grep -F "iPhone Duo (" | grep -oE '[0-9A-F-]{36}' | head -1); xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b >/dev/null; }
-          echo "reading the log of $UDID"
-          xcrun simctl spawn "$UDID" log show --last 30m --style compact --info --debug \
-            --predicate 'process CONTAINS "Touch" OR eventMessage CONTAINS "touch-controls" OR eventMessage CONTAINS "TouchControls" OR (process == "runningboardd" AND (eventMessage CONTAINS "termination" OR eventMessage CONTAINS "exited")) OR (process == "SpringBoard" AND (eventMessage CONTAINS "watchdog" OR eventMessage CONTAINS "Process exited"))' \
-            > "diag/controls-iphone.log" 2>&1 || true
-          echo "controls-iphone: $(wc -l < diag/controls-iphone.log) lines"
-          grep -E "touch-controls.*(termination reported by launchd|exited with context)|Successfully spawned TouchControls" "diag/controls-iphone.log" | tail -40
+        run: mkdir -p diag/iphone && cp -R repo/build/platform/build/touch-gamepad-fixture/*.log* repo/build/platform/build/touch-controls-fixture/*.log* diag/iphone/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: touch-sequence-diagnose-${{ matrix.copy }}
+          name: touch-fix-${{ matrix.copy }}
           path: diag
       - name: Result
         if: ${{ !cancelled() }}
         run: |
+          echo "gamepad iPad=${{ steps.gpad.outcome }} iPhone=${{ steps.gphone.outcome }}"
           echo "controls iPad=${{ steps.cpad.outcome }} iPhone=${{ steps.cphone.outcome }}"
-          test "${{ steps.cpad.outcome }}${{ steps.cphone.outcome }}" = successsuccess
+          test "${{ steps.gpad.outcome }}${{ steps.gphone.outcome }}${{ steps.cpad.outcome }}${{ steps.cphone.outcome }}" = successsuccesssuccesssuccess
