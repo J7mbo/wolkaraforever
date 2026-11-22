@@ -1,5 +1,5 @@
-# Throwaway (ci/ipa only): the tunnel-manager test, as Tolkara has it (with one diagnostic print)
-# and with the candidate fix, then the whole emulation suite with the fix.
+# Throwaway (ci/ipa only): the BC texture fallback test with diagnostic prints, on GitHub's
+# virtual GPU, to see why a blit upload into a Private texture reads back empty.
 name: Platform probe
 on:
   push:
@@ -14,9 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            .github/tunnel-test.diff
-            .github/as-is.py
+          sparse-checkout: .github/bc-instrument.py
           sparse-checkout-cone-mode: false
           path: ci
       - uses: actions/checkout@v4
@@ -28,33 +26,19 @@ jobs:
       - run: brew install xcodegen
       - working-directory: repo
         run: wolkaraforever/tools/prepare.sh > /dev/null
-      - name: Build the two variants
+      - name: Build with prints
         working-directory: repo/build/platform
         run: |
-          mkdir -p build/emulation build/probe
-          xcrun clang -fobjc-arc -Wall -Wextra -Werror -Iauthorization/Pairing -c authorization/Pairing/TunnelTLS.m -o build/emulation/TunnelTLS.o
-          cp tests/test_tunnel_manager.swift build/probe/as_is.swift
-          python3 ../../../ci/.github/as-is.py
-          patch -p1 < ../../../ci/.github/tunnel-test.diff
-          cp tests/test_tunnel_manager.swift build/probe/fixed.swift
-          for v in as_is fixed; do
-            xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors -g -sanitize=address \
-              -import-objc-header authorization/Transport/TransportBridge.h \
-              authorization/Pairing/*.swift authorization/Transport/*.swift build/emulation/TunnelTLS.o \
-              build/probe/$v.swift -o build/probe/$v
-          done
-      - name: As Tolkara has it, three times
+          python3 ../../../ci/.github/bc-instrument.py
+          mkdir -p build/emulation
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -O1 -g -fsanitize=address,undefined \
+            -Itranslation/AKSupport -Itranslation/Metal -Itests -framework Foundation -framework Metal \
+            translation/AKSupport/AKSupport.m translation/Metal/BCTextures.m translation/Metal/BCDecode.c tests/test_bc_textures.m \
+            -o build/emulation/test_bc_textures
+      - name: Forced fallback, with prints
         working-directory: repo/build/platform
         run: |
-          for i in 1 2 3; do build/probe/as_is > ../as_is.log 2>&1; echo "run $i exit $?"; grep -E "AS-IS|Fatal|passed" ../as_is.log; done
-      - name: With the fix, five times
-        working-directory: repo/build/platform
-        run: |
-          for i in 1 2 3 4 5; do build/probe/fixed > ../fixed.log 2>&1 || { cat ../fixed.log | tail -5; exit 1; }; tail -1 ../fixed.log; done
-      - name: The whole emulation suite, with the fix
-        working-directory: repo/build/platform
-        run: |
-          bash tools/test_emulation.sh > ../suite.log 2>&1 && rc=0 || rc=$?
-          tail -15 ../suite.log
-          grep -E "^(FAIL|ERROR): " ../suite.log | head || true
-          echo "suite exit $rc"
+          system_profiler SPDisplaysDataType | head -20 || true
+          TOLKARA_BC_FALLBACK=on build/emulation/test_bc_textures > ../bc.log 2>&1 && rc=0 || rc=$?
+          grep -E "PROBE|differs|Paravirtual|replaceRegion|partial|array|3D|blit|texture to|heap|read back|PASS" ../bc.log | head -80
+          echo "exit $rc"
