@@ -1,5 +1,5 @@
-# Throwaway (ci/ipa only): why the signing tests fail on GitHub's Macs (in a pristine platform
-# checkout, no layer), and what the rest of the emulation suite does after them.
+# Throwaway (ci/ipa only): the launcher UI policy check alone on the MR branch, set up exactly as
+# the Validate workflow's launcher group, with its output in the log and a timestamp per line.
 name: Platform probe
 on:
   push:
@@ -10,40 +10,24 @@ permissions:
 jobs:
   probe:
     runs-on: xcode-27
-    timeout-minutes: 50
+    timeout-minutes: 60
+    env:
+      UI_BASELINE_UNCOMPARED: >-
+        ipad-pro-13-m5/addons-popup.png
+        ipad-pro-13-m5/wow-addons-de.png
+        ipad-pro-13-m5/wow-addons-recommended-wolkararoue.png
     steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/bc-fix.diff
-          sparse-checkout-cone-mode: false
-          path: ci
       - uses: actions/checkout@v4
         with:
           ref: fix/touch-suite-reliability
           fetch-depth: 0
-          path: repo
       - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
-      - run: brew install xcodegen
-      - name: The machine's code-signing enforcement
+      - run: brew install xcodegen luajit
+      - run: wolkaraforever/tools/setup_simulators.sh --apply
+      - name: Start booting both simulators in the background
         run: |
-          csrutil status || true
-          nvram boot-args 2>&1 || true
-          sysctl kern.hv_vmm_present 2>/dev/null || true
-          sw_vers
-      - name: The signing tests in a pristine platform checkout (no layer)
-        working-directory: repo/platform
+          . wolkaraforever/tools/simulators.sh
+          for s in ipad iphone; do simulator_use "$s"; nohup xcrun simctl boot "$SIM_ID" > /dev/null 2>&1 & done
+      - name: check_ui_policy.sh, every line timestamped
         run: |
-          python3 -m unittest -v tests.test_sign_guest_local.AdhocTests.test_macos_dlopen tests.test_sign_guest_local.AdhocTests.test_macos_executable_runs 2>&1 | tail -30 || true
-          python3 -m unittest -v tests.test_build_signed_container.EndToEndTests.test_tampered_container_never_runs 2>&1 | tail -20 || true
-      - name: The rest of the emulation suite (layered, both fixes, the signing lines tolerated)
-        working-directory: repo
-        run: |
-          wolkaraforever/tools/prepare.sh > /dev/null
-          cd build/platform
-          patch -p1 < ../../../ci/.github/bc-fix.diff
-          sed -i '' 's/^python3 -m unittest tests.test_build_signed_container$/python3 -m unittest tests.test_build_signed_container || true/' tools/test_emulation.sh
-          bash tools/test_emulation.sh > ../suite.log 2>&1 && rc=0 || rc=$?
-          tail -12 ../suite.log
-          grep -E "^(FAIL|ERROR): " ../suite.log || true
-          grep -c PLATFORM_EMULATION_COMPLETE ../suite.log || true
-          echo "suite exit $rc"
+          wolkaraforever/tools/check_ui_policy.sh 2>&1 | while IFS= read -r line; do printf '%s %s\n' "$(date +%H:%M:%S)" "$line"; done | grep -vE "\[com\.apple\.|Df WoWFixture|Default WoWFixture|^\S+ +\"<|^\S+ +\)\}" 
