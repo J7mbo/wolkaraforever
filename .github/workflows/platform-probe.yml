@@ -1,0 +1,23 @@
+# Throwaway (ci/ipa only): the platform emulation suite alone on the MR branch, output in the log.
+name: Platform probe
+on:
+  push:
+    branches: [ci/ipa]
+    paths: [.github/workflows/platform-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/touch-suite-reliability
+          fetch-depth: 0
+      - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
+      - run: brew install xcodegen
+      - run: wolkaraforever/tools/prepare.sh
+      - name: Emulation suite
+        working-directory: build/platform
+        run: bash tools/test_emulation.sh 2>&1 | tail -80
