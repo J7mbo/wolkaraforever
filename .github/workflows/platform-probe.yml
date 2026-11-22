@@ -46,15 +46,12 @@ jobs:
           grep -E "PROBE|differs|Paravirtual|replaceRegion|partial|array|3D|blit|texture to|heap|read back|PASS" ../bc.log | head -80
           echo "exit $rc"
       - name: The whole emulation suite, with the fix (no prints)
-        working-directory: repo/build/platform
+        working-directory: repo
         run: |
-          git -C ../.. status --short | head -3 || true
-          git checkout -- translation/Metal/BCTextures.m tests/test_bc_textures.m 2>/dev/null || cp ../../platform/translation/Metal/BCTextures.m translation/Metal/BCTextures.m
-          rm -f build/emulation/test_bc_textures
-          ../../wolkaraforever/tools/prepare.sh > /dev/null
-          patch -p1 < ../../../ci/.github/bc-fix.diff
-          bash tools/test_emulation.sh > ../suite.log 2>&1 && rc=0 || rc=$?
-          tail -12 ../suite.log
-          grep -E "^(FAIL|ERROR): " ../suite.log | head || true
-          grep -c PLATFORM_EMULATION_COMPLETE ../suite.log || true
+          wolkaraforever/tools/prepare.sh > /dev/null
+          (cd build/platform && patch -p1 < ../../../ci/.github/bc-fix.diff)
+          (cd build/platform && bash tools/test_emulation.sh) > build/suite.log 2>&1 && rc=0 || rc=$?
+          tail -12 build/suite.log
+          grep -E "^(FAIL|ERROR): " build/suite.log | head || true
+          grep -c PLATFORM_EMULATION_COMPLETE build/suite.log || true
           echo "suite exit $rc"
