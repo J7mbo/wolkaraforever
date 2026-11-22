@@ -1,5 +1,5 @@
-# Throwaway (ci/ipa only): the BC texture fallback test with diagnostic prints, on GitHub's
-# virtual GPU, with the candidate fix, then the whole emulation suite with it.
+# Throwaway (ci/ipa only): why the signing tests fail on GitHub's Macs (in a pristine platform
+# checkout, no layer), and what the rest of the emulation suite does after them.
 name: Platform probe
 on:
   push:
@@ -10,13 +10,11 @@ permissions:
 jobs:
   probe:
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            .github/bc-instrument.py
-            .github/bc-fix.diff
+          sparse-checkout: .github/bc-fix.diff
           sparse-checkout-cone-mode: false
           path: ci
       - uses: actions/checkout@v4
@@ -26,32 +24,26 @@ jobs:
           path: repo
       - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
       - run: brew install xcodegen
-      - working-directory: repo
-        run: wolkaraforever/tools/prepare.sh > /dev/null
-      - name: Build with prints
-        working-directory: repo/build/platform
+      - name: The machine's code-signing enforcement
         run: |
-          patch -p1 < ../../../ci/.github/bc-fix.diff
-          python3 ../../../ci/.github/bc-instrument.py
-          mkdir -p build/emulation
-          xcrun clang -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -O1 -g -fsanitize=address,undefined \
-            -Itranslation/AKSupport -Itranslation/Metal -Itests -framework Foundation -framework Metal \
-            translation/AKSupport/AKSupport.m translation/Metal/BCTextures.m translation/Metal/BCDecode.c tests/test_bc_textures.m \
-            -o build/emulation/test_bc_textures
-      - name: Forced fallback, with prints
-        working-directory: repo/build/platform
+          csrutil status || true
+          nvram boot-args 2>&1 || true
+          sysctl kern.hv_vmm_present 2>/dev/null || true
+          sw_vers
+      - name: The signing tests in a pristine platform checkout (no layer)
+        working-directory: repo/platform
         run: |
-          system_profiler SPDisplaysDataType | head -20 || true
-          TOLKARA_BC_FALLBACK=on build/emulation/test_bc_textures > ../bc.log 2>&1 && rc=0 || rc=$?
-          grep -E "PROBE|differs|Paravirtual|replaceRegion|partial|array|3D|blit|texture to|heap|read back|PASS" ../bc.log | head -80
-          echo "exit $rc"
-      - name: The whole emulation suite, with the fix (no prints)
+          python3 -m unittest -v tests.test_sign_guest_local.AdhocTests.test_macos_dlopen tests.test_sign_guest_local.AdhocTests.test_macos_executable_runs 2>&1 | tail -30 || true
+          python3 -m unittest -v tests.test_build_signed_container.EndToEndTests.test_tampered_container_never_runs 2>&1 | tail -20 || true
+      - name: The rest of the emulation suite (layered, both fixes, the signing lines tolerated)
         working-directory: repo
         run: |
           wolkaraforever/tools/prepare.sh > /dev/null
-          (cd build/platform && patch -p1 < ../../../ci/.github/bc-fix.diff)
-          (cd build/platform && bash tools/test_emulation.sh) > build/suite.log 2>&1 && rc=0 || rc=$?
-          tail -12 build/suite.log
-          grep -E "^(FAIL|ERROR): " build/suite.log | head || true
-          grep -c PLATFORM_EMULATION_COMPLETE build/suite.log || true
+          cd build/platform
+          patch -p1 < ../../../ci/.github/bc-fix.diff
+          sed -i '' 's/^python3 -m unittest tests.test_build_signed_container$/python3 -m unittest tests.test_build_signed_container || true/' tools/test_emulation.sh
+          bash tools/test_emulation.sh > ../suite.log 2>&1 && rc=0 || rc=$?
+          tail -12 ../suite.log
+          grep -E "^(FAIL|ERROR): " ../suite.log || true
+          grep -c PLATFORM_EMULATION_COMPLETE ../suite.log || true
           echo "suite exit $rc"
