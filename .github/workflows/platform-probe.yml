@@ -1,5 +1,5 @@
 # Throwaway (ci/ipa only): the BC texture fallback test with diagnostic prints, on GitHub's
-# virtual GPU, to see why a blit upload into a Private texture reads back empty.
+# virtual GPU, with the candidate fix, then the whole emulation suite with it.
 name: Platform probe
 on:
   push:
@@ -14,7 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .github/bc-instrument.py
+          sparse-checkout: |
+            .github/bc-instrument.py
+            .github/bc-fix.diff
           sparse-checkout-cone-mode: false
           path: ci
       - uses: actions/checkout@v4
@@ -29,6 +31,7 @@ jobs:
       - name: Build with prints
         working-directory: repo/build/platform
         run: |
+          patch -p1 < ../../../ci/.github/bc-fix.diff
           python3 ../../../ci/.github/bc-instrument.py
           mkdir -p build/emulation
           xcrun clang -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -O1 -g -fsanitize=address,undefined \
@@ -42,3 +45,16 @@ jobs:
           TOLKARA_BC_FALLBACK=on build/emulation/test_bc_textures > ../bc.log 2>&1 && rc=0 || rc=$?
           grep -E "PROBE|differs|Paravirtual|replaceRegion|partial|array|3D|blit|texture to|heap|read back|PASS" ../bc.log | head -80
           echo "exit $rc"
+      - name: The whole emulation suite, with the fix (no prints)
+        working-directory: repo/build/platform
+        run: |
+          git -C ../.. status --short | head -3 || true
+          git checkout -- translation/Metal/BCTextures.m tests/test_bc_textures.m 2>/dev/null || cp ../../platform/translation/Metal/BCTextures.m translation/Metal/BCTextures.m
+          rm -f build/emulation/test_bc_textures
+          ../../wolkaraforever/tools/prepare.sh > /dev/null
+          patch -p1 < ../../../ci/.github/bc-fix.diff
+          bash tools/test_emulation.sh > ../suite.log 2>&1 && rc=0 || rc=$?
+          tail -12 ../suite.log
+          grep -E "^(FAIL|ERROR): " ../suite.log | head || true
+          grep -c PLATFORM_EMULATION_COMPLETE ../suite.log || true
+          echo "suite exit $rc"
