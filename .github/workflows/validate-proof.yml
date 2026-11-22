@@ -1,5 +1,5 @@
 # Throwaway (ci/ipa only): runs the MR branch's own Validate workflow for the MR branch, as a
-# maintainer's "Run workflow" would. (re-run 10)
+# maintainer's "Run workflow" would. (re-run 11)
 name: Validate proof
 on:
   push:
