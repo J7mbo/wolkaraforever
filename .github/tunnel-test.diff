@@ -1,0 +1,28 @@
+--- a/tests/test_tunnel_manager.swift
++++ b/tests/test_tunnel_manager.swift
+@@ -108,11 +108,22 @@
+                     failures += 1; manager.cancel()
+                 }
+             }
+-            for (index,t) in [1.0,3,7,15,23,31].enumerated() {
+-                queue.asyncAfter(deadline:.now()+Double(index+1)*0.15) { clock = t }
++            // Advance the injected clock one retransmission step at a time, and only after
++            // the timer has acted on the step before: each retransmission is one more packet
++            // on the link. A fixed schedule assumed the 0.1 s timer fires at least once every
++            // 0.15 s; a host that coalesces timers skipped a step, the stream never reached
++            // its last retry, and no timeout came.
++            let steps: [Double] = [1,3,7,15,23,31]
++            var step = 0
++            func advance() {
++                guard step < steps.count else { return }
++                if link.packets.count >= step + 1 { clock = steps[step]; step += 1 }
++                queue.asyncAfter(deadline:.now()+0.02) { advance() }
+             }
++            advance()
+         }
+-        check(done.wait(timeout:.now()+3) == .success,"automatic timer drives TCP")
++        // A hang guard, not a timing assertion: every step waits for the timer, however late.
++        check(done.wait(timeout:.now()+20) == .success,"automatic timer drives TCP")
+         print("Tunnel manager: serial callbacks, reentrant cancellation/failure, independent streams and automatic timeout passed")
+     }
+ }
