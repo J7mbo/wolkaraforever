@@ -33,6 +33,7 @@ jobs:
           ref: ${{ steps.target.outputs.ref }}
           path: repo
           fetch-depth: 0
+      - run: sudo mdutil -a -i off > /dev/null || true
       - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
       - working-directory: repo
         run: wolkaraforever/tools/setup_simulators.sh --apply
